@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "#discord/*": ["packages/discord-bot/src/*"],
+      "#relay/*": ["packages/relay-server/src/*"],
+      "#shared/*": ["packages/shared/src/*"],
+      "#extension/*": ["packages/vscode-extension/src/*"]
+    }
+  }
+}

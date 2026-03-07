@@ -1,4 +1,17 @@
 {
+  "name": "@remote-copilot/vscode-extension",
+  "imports": {
+    "#discord/*": "./packages/discord-bot/src/*",
+    "#relay/*": "./packages/relay-server/src/*",
+    "#shared/*": "./packages/shared/src/*",
+    "#extension/*": "./packages/vscode-extension/src/*"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   }
