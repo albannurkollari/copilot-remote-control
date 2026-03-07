@@ -1,0 +1,28 @@
+# EditorConfig helps maintain consistent coding styles across editors and IDEs.
+# See https://editorconfig.org for more information.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 2
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{json,jsonc}]
+indent_size = 2
+
+[*.{ts,tsx,js,jsx,mjs,cjs}]
+indent_size = 2
+quote_type = single
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

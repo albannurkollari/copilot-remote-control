@@ -1,0 +1,34 @@
+# Enforce LF line endings for all files in this repository.
+* text=auto eol=lf
+
+# Explicitly declare text files to always normalize and convert to LF on checkout.
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.scss  text eol=lf
+*.sh    text eol=lf
+
+# Binary files – do not modify.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.svg   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
