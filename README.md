@@ -1,4 +1,4 @@
-<img src="https://repository-images.githubusercontent.com/1175490456/8305002a-52fc-475a-a6c1-9bae46bdd4be" alt="Social preview for copilot-remote-control" width="640">
+<img src="https://repository-images.githubusercontent.com/1175490456/8305002a-52fc-475a-a6c1-9bae46bdd4be" alt="Illustration of a laptop showing GitHub Copilot Chat connected to Discord with the title Copilot Remote Control" width="640">
 
 # copilot-remote-control
 
