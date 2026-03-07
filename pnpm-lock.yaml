@@ -12,9 +12,15 @@ importers:
         specifier: ^0.36.0
         version: 0.36.0
     devDependencies:
+      '@types/node':
+        specifier: ^25.3.5
+        version: 25.3.5
       oxlint:
         specifier: ^1.51.0
         version: 1.51.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
 packages:
 
@@ -262,6 +268,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@types/node@25.3.5':
+    resolution: {integrity: sha512-oX8xrhvpiyRCQkG1MFchB09f+cXftgIXb3a7UUa4Y3wpmZPw5tyZGTLWhlESOLq1Rq6oDlc8npVU2/9xiCuXMA==}
+
   oxfmt@0.36.0:
     resolution: {integrity: sha512-/ejJ+KoSW6J9bcNT9a9UtJSJNWhJ3yOLSBLbkoFHJs/8CZjmaZVZAJe4YgO1KMJlKpNQasrn/G9JQUEZI3p0EQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -280,6 +289,14 @@ packages:
   tinypool@2.1.0:
     resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
     engines: {node: ^20.0.0 || >=22.0.0}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
 snapshots:
 
@@ -397,6 +414,10 @@ snapshots:
   '@oxlint/binding-win32-x64-msvc@1.51.0':
     optional: true
 
+  '@types/node@25.3.5':
+    dependencies:
+      undici-types: 7.18.2
+
   oxfmt@0.36.0:
     dependencies:
       tinypool: 2.1.0
@@ -444,3 +465,7 @@ snapshots:
       '@oxlint/binding-win32-x64-msvc': 1.51.0
 
   tinypool@2.1.0: {}
+
+  typescript@5.9.3: {}
+
+  undici-types@7.18.2: {}
