@@ -49,12 +49,15 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "typecheck": "pnpm -r run typecheck"
   },
   "dependencies": {
     "oxfmt": "^0.36.0"
   },
   "devDependencies": {
-    "oxlint": "^1.51.0"
+    "@types/node": "^25.3.5",
+    "oxlint": "^1.51.0",
+    "typescript": "^5.9.3"
   }
 }
