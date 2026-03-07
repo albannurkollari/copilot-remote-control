@@ -1,0 +1,60 @@
+{
+  "name": "remote-copilot-control",
+  "description": "Remote control system for GitHub Copilot Chat via Discord using a VSCode extension bridge and WebSocket relay.",
+  "private": true,
+  "version": "0.0.1",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "10"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "keywords": [
+    "TypeScript",
+    "remote control",
+    "automation",
+    "AI",
+    "Agentic AI",
+    "Discord",
+    "VSCode",
+    "extension"
+  ],
+  "homepage": "https://github.com/albannurkollari/copilot-remote-control",
+  "bugs": {
+    "url": "https://github.com/albannurkollari/copilot-remote-control/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/albannurkollari/copilot-remote-control.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Alban Nurkollari",
+    "email": "albannurkollari@gmail.com"
+  },
+  "contributors": [
+    {
+      "name": "Alban Nurkollari",
+      "email": "albannurkollari@gmail.com",
+      "url": "https://github.com/albannurkollari"
+    }
+  ],
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "clean": "pnpm -r run clean",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "dependencies": {
+    "oxfmt": "^0.36.0"
+  },
+  "devDependencies": {
+    "oxlint": "^1.51.0"
+  }
+}

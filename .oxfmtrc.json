@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["dist", "node_modules", "*.md", "!*.yml", "!*.yaml"],
+  "singleQuote": true,
+  "printWidth": 80,
+  "trailingComma": "none",
+  "experimentalSortImports": {
+    "groups": [
+      "builtin",
+      "external",
+      "internal",
+      ["parent", "sibling", "index"]
+    ],
+    "internalPattern": ["#/**", "src/**", "packages/**", "@remote-copilot/**"],
+    "newlinesBetween": false
+  }
+}
