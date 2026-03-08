@@ -28,5 +28,5 @@ jobs:
 
       - name: Run semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.MV_RELEASE_PAT || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: pnpm release
