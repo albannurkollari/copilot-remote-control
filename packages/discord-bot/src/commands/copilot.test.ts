@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { buildCopilotPromptMessage, createCopilotCommand } from './copilot.js';
 
 describe('copilot command', () => {
