@@ -38,6 +38,24 @@ Do not introduce:
 
 Compilation should only occur during the build step.
 
+Shell And Terminal Defaults
+
+Prefer Bash as the default shell for command execution.
+
+Do not use PowerShell unless:
+
+- the user explicitly asks for it
+- the task clearly requires PowerShell-specific behavior
+
+When running multiple sequential commands for the same task, prefer reusing the active shared integrated terminal instead of spawning a new terminal for each command.
+
+Only use a separate terminal when necessary, such as:
+
+- concurrent long-running processes
+- background services
+- isolating unrelated workflows
+- avoiding disruption of an already-running command sequence
+
 Workspace Rules
 
 This repository uses pnpm workspaces.
