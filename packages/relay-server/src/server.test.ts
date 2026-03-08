@@ -1,5 +1,4 @@
 import { createRequestId, type RelayMessage } from '@remote-copilot/shared';
-import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { RelayServer } from './server.js';
 

@@ -1,6 +1,10 @@
-# copilot-remote-control
+# Copilot Remote Control
 
 ![Illustration of a laptop showing GitHub Copilot Chat connected to Discord with the title Copilot Remote Control](https://repository-images.githubusercontent.com/1175490456/8305002a-52fc-475a-a6c1-9bae46bdd4be)
+
+![Tests](https://github.com/albannurkollari/copilot-remote-control/actions/workflows/tests.yml/badge.svg)
+[![codecov](https://codecov.io/gh/albannurkollari/copilot-remote-control/graph/badge.svg?token=aCU2hYVAO3)](https://codecov.io/gh/albannurkollari/copilot-remote-control)
+[![semantic-release: angular](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release)
 
 Remote control system for GitHub Copilot Chat via Discord using a VSCode extension bridge and WebSocket relay.
 

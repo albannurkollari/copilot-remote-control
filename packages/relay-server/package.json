@@ -23,7 +23,7 @@
     "build": "tsup",
     "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --project @remote-copilot/relay-server"
   },
   "dependencies": {
     "@remote-copilot/shared": "workspace:*",
