@@ -1,8 +1,6 @@
+import { createRequestId, type RelayMessage } from '@remote-copilot/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-
-import { createRequestId, type RelayMessage } from '@remote-copilot/shared';
-
 import { RelayServer } from './server.js';
 
 const waitForOpen = (socket: WebSocket) => {
@@ -42,10 +40,22 @@ describe('RelayServer', () => {
     const discord = await createSocket(server.address);
     const vscode = await createSocket(server.address);
 
-    discord.send(JSON.stringify({ type: 'register', clientRole: 'discord', clientId: 'bot-1' }));
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
     expect((await nextMessage(discord)).type).toBe('register_ack');
 
-    vscode.send(JSON.stringify({ type: 'register', clientRole: 'vscode', clientId: 'workspace-1' }));
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
     expect((await nextMessage(vscode)).type).toBe('register_ack');
 
     const requestId = createRequestId();
@@ -62,7 +72,9 @@ describe('RelayServer', () => {
     const forwardedPrompt = await nextMessage(vscode);
     expect(forwardedPrompt.type).toBe('copilot_prompt');
     if (forwardedPrompt.type !== 'copilot_prompt') {
-      throw new Error(`Expected copilot_prompt but received ${forwardedPrompt.type}`);
+      throw new Error(
+        `Expected copilot_prompt but received ${forwardedPrompt.type}`
+      );
     }
 
     expect(forwardedPrompt.requestId).toBe(requestId);
@@ -80,7 +92,9 @@ describe('RelayServer', () => {
     const firstChunk = await nextMessage(discord);
     expect(firstChunk.type).toBe('copilot_stream');
     if (firstChunk.type !== 'copilot_stream') {
-      throw new Error(`Expected copilot_stream but received ${firstChunk.type}`);
+      throw new Error(
+        `Expected copilot_stream but received ${firstChunk.type}`
+      );
     }
 
     expect(firstChunk.delta).toBe('Hello');
@@ -97,7 +111,9 @@ describe('RelayServer', () => {
     const finalChunk = await nextMessage(discord);
     expect(finalChunk.type).toBe('copilot_stream');
     if (finalChunk.type !== 'copilot_stream') {
-      throw new Error(`Expected copilot_stream but received ${finalChunk.type}`);
+      throw new Error(
+        `Expected copilot_stream but received ${finalChunk.type}`
+      );
     }
 
     expect(finalChunk.done).toBe(true);
@@ -131,7 +147,13 @@ describe('RelayServer', () => {
     await server.start();
 
     const discord = await createSocket(server.address);
-    discord.send(JSON.stringify({ type: 'register', clientRole: 'discord', clientId: 'bot-1' }));
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
     expect((await nextMessage(discord)).type).toBe('register_ack');
 
     discord.send(
