@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
+import pc from 'picocolors';
 import {
   createPongMessage,
   parseRelayMessage,
@@ -21,6 +22,7 @@ export interface RelayServerOptions {
   host?: string;
   path?: string;
   port?: number;
+  verbose?: boolean;
 }
 
 interface RegisteredClient {
@@ -33,6 +35,8 @@ interface RegisteredClient {
 interface PendingRequest {
   discordConnectionId: string;
   discordSocket: WebSocket;
+  hasLoggedReply: boolean;
+  replyText: string;
   targetClientId: string;
 }
 
@@ -44,6 +48,7 @@ export class RelayServer {
   readonly host: string;
   readonly path: string;
   readonly port: number;
+  readonly verbose: boolean;
 
   #httpServer?: HttpServer;
   #started = false;
@@ -59,10 +64,32 @@ export class RelayServer {
     this.host = options.host ?? DEFAULT_HOST;
     this.path = options.path ?? DEFAULT_PATH;
     this.port = options.port ?? DEFAULT_PORT;
+    this.verbose = options.verbose ?? false;
   }
 
   get address() {
     return `ws://${this.host}:${this.port}${this.path}`;
+  }
+
+  #log(message: string) {
+    process.stdout.write(`${message}\n`);
+  }
+
+  #logDiscordPrompt(message: CopilotPromptMessage) {
+    const source = pc.cyan('Discord');
+    const arrow = pc.dim('→');
+    const target = pc.magenta(`Copilot(${message.clientId})`);
+    const mode = pc.yellow(`[${message.mode}]`);
+    const author = pc.dim(message.userDisplayName ?? 'unknown');
+
+    this.#log(`${source} ${arrow} ${target} ${mode} ${author}: ${message.prompt}`);
+  }
+
+  #logCopilotReply(message: CopilotStreamMessage, content = 'Replies') {
+    const source = pc.magenta('Copilot');
+    const arrow = pc.dim('→');
+    const target = pc.cyan(`Discord(${message.clientId})`);
+    this.#log(`${source} ${arrow} ${target}: ${pc.green(content)}`);
   }
 
   async start() {
@@ -286,8 +313,12 @@ export class RelayServer {
     this.#requests.set(message.requestId, {
       discordConnectionId: client.connectionId,
       discordSocket: client.socket,
+      hasLoggedReply: false,
+      replyText: '',
       targetClientId: message.clientId
     });
+
+    this.#logDiscordPrompt(message);
 
     this.#send(vscodeClient.socket, message);
   }
@@ -316,7 +347,27 @@ export class RelayServer {
       return;
     }
 
+    if (this.verbose && message.delta) {
+      request.replyText += message.delta;
+    }
+
+    if (!this.verbose && !request.hasLoggedReply) {
+      request.hasLoggedReply = true;
+      this.#logCopilotReply(message);
+    }
+
     this.#send(request.discordSocket, message);
+
+    if (this.verbose && !request.hasLoggedReply && (message.done || message.error)) {
+      request.hasLoggedReply = true;
+      const content = message.error
+        ? `Error: ${message.error}`
+        : request.replyText.trim() || 'Replies';
+
+      queueMicrotask(() => {
+        this.#logCopilotReply(message, content);
+      });
+    }
 
     if (message.done) {
       this.#requests.delete(message.requestId);
@@ -498,11 +549,15 @@ export class RelayServer {
 
 export const loadRelayServerOptions = (): RelayServerOptions => {
   const port = Number.parseInt(process.env.RELAY_PORT ?? `${DEFAULT_PORT}`, 10);
+  const hasVerboseFlag = process.argv.includes('--verbose');
+  const relayLogLevel = process.env.RELAY_LOG?.trim().toLowerCase();
+  const verbose = hasVerboseFlag || relayLogLevel === 'verbose';
 
   return {
     host: process.env.RELAY_HOST ?? DEFAULT_HOST,
     path: process.env.RELAY_PATH ?? DEFAULT_PATH,
-    port: Number.isNaN(port) ? DEFAULT_PORT : port
+    port: Number.isNaN(port) ? DEFAULT_PORT : port,
+    verbose
   };
 };
 
