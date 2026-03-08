@@ -1,10 +1,16 @@
 {
   "name": "@remote-copilot/shared",
+  "version": "0.0.1",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "imports": {
-    "#discord/*": "./packages/discord-bot/src/*",
-    "#relay/*": "./packages/relay-server/src/*",
-    "#shared/*": "./packages/shared/src/*",
-    "#extension/*": "./packages/vscode-extension/src/*"
+    "#discord/*": "./../discord-bot/src/*",
+    "#relay/*": "./../relay-server/src/*",
+    "#shared/*": "./src/*",
+    "#extension/*": "./../vscode-extension/src/*"
   },
   "exports": {
     ".": {
@@ -13,6 +19,10 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "dev": "node src/index.ts",
+    "build": "tsup",
+    "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run"
   }
 }
