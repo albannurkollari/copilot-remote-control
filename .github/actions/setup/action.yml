@@ -1,0 +1,25 @@
+name: Setup Node & pnpm
+description: Setup Node & pnpm with a stable cached store
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10
+        run_install: false
+
+    - name: Setup Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        cache: pnpm
+
+    - name: Fetch dependencies (no scripts)
+      shell: bash
+      run: pnpm fetch --ignore-scripts
+
+    - name: Install dependencies (offline, no scripts)
+      shell: bash
+      run: pnpm install --offline --frozen-lockfile --ignore-scripts
