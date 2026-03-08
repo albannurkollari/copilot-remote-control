@@ -61,6 +61,7 @@ Use `/copilot` in Discord, choose a mode, and enter a prompt. The reply is strea
 ## Documentation
 
 - [Local development](docs/local-development.md)
+- [Terms of Service](docs/terms-of-service.md)
 - [Project TODO](TODO.md)
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
