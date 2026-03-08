@@ -1,12 +1,12 @@
 pre-push:
   commands:
     typecheck:
-      run: pnpm typecheck
+      run: corepack pnpm typecheck
     lint:
-      run: pnpm lint
+      run: corepack pnpm lint
     format:
       run: |
-        pnpm fmt
+        corepack pnpm fmt
         git diff --quiet
       fail_text: 'Code is not formatted! Stage and commit the changes.'
 # post-commit:

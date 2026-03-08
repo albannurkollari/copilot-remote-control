@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
       "#discord/*": ["packages/discord-bot/src/*"],
       "#relay/*": ["packages/relay-server/src/*"],

@@ -1,11 +1,8 @@
 {
   "name": "@remote-copilot/relay-server",
-  "imports": {
-    "#discord/*": "./packages/discord-bot/src/*",
-    "#relay/*": "./packages/relay-server/src/*",
-    "#shared/*": "./packages/shared/src/*",
-    "#extension/*": "./packages/vscode-extension/src/*"
-  },
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,6 +10,9 @@
     }
   },
   "scripts": {
+    "dev": "node src/index.ts",
+    "build": "tsup",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit"
   }
 }
