@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 import {
   createPongMessage,
   parseRelayMessage,
@@ -513,7 +514,7 @@ export const startRelayServer = async (
   return server;
 };
 
-if (import.meta.url === new URL(process.argv[1] ?? '', 'file:').href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const server = await startRelayServer();
 
   process.stdout.write(`Relay server listening on ${server.address}\n`);

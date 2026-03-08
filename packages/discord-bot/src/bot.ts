@@ -6,6 +6,7 @@ import {
   Routes,
   type ChatInputCommandInteraction
 } from 'discord.js';
+import { pathToFileURL } from 'node:url';
 import {
   buildCopilotPromptMessage,
   COPILOT_COMMAND_NAME,
@@ -244,7 +245,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
   };
 };
 
-if (import.meta.url === new URL(process.argv[1] ?? '', 'file:').href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const bot = createDiscordBot(loadDiscordBotConfig());
   await bot.start();
 }
