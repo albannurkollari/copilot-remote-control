@@ -1,67 +1,74 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import pc from 'picocolors';
 import { CommandBuilder, ProcessState } from './commands.ts';
 
 const APPS_DIR = 'packages';
-const pkgJson = 'package.json';
-const tsConfigPathsJson = 'tsconfig.paths.json';
-const fileReadOptions = { encoding: 'utf8' } as const;
+const PACKAGE_JSON = 'package.json';
+const TS_CONFIG_PATHS_JSON = 'tsconfig.paths.json';
+const READ_OPTIONS = { encoding: 'utf8' } as const;
 const oxfmt = new CommandBuilder({ main: 'oxfmt', sub: [] });
 
 type ImportsMap = Record<string, string | Record<string, string>>;
 type WhichPackage = 'root' | `${typeof APPS_DIR}/${string}`;
 
+type PackageJsonRecord = {
+  imports?: ImportsMap;
+  path: string;
+  raw: string;
+} & Record<string, unknown>;
+
+const toPackageJSONString = (pkg: Record<string, unknown>) => {
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+};
+
+const getPathKey = (name: string) => {
+  if (/^discord/i.test(name)) {
+    return 'discord';
+  }
+
+  if (/^vscode/i.test(name)) {
+    return 'extension';
+  }
+
+  if (/^relay/i.test(name)) {
+    return 'relay';
+  }
+
+  return name;
+};
+
 const getPackageJson = async (
   which: WhichPackage = 'root',
   failOnError = true
 ) => {
-  type PathAndPackageRecord = {
-    imports?: ImportsMap;
-    path: string;
-    raw: string;
-  } & Record<string, unknown>;
-
   try {
-    const pkgPath = (() => {
-      if (which === 'root') {
-        return path.relative(process.cwd(), pkgJson);
-      } else if (which.startsWith(`${APPS_DIR}/`)) {
-        const filePath = path.join(which, pkgJson);
-
-        return path.relative(process.cwd(), filePath);
-      }
-
-      // Error log handled in catch block, just throw to skip to it.
-      throw '';
-    })();
-
-    const pkgRaw = await readFile(pkgPath, fileReadOptions);
+    const pkgPath =
+      which === 'root' ? PACKAGE_JSON : path.join(which, PACKAGE_JSON);
+    const pkgRaw = await readFile(pkgPath, READ_OPTIONS);
 
     return {
       ...JSON.parse(pkgRaw),
       path: pkgPath,
       raw: pkgRaw
-    } as PathAndPackageRecord;
+    } as PackageJsonRecord;
   } catch {
-    console.log(pc.yellow(`⚠ Skipping "${which}/${pkgJson}" or`));
-    console.log(pc.redBright(`❌ No "${which}/${pkgJson}" found`));
+    console.log(pc.yellow(`⚠ Skipping "${which}/${PACKAGE_JSON}" or`));
+    console.log(pc.redBright(`❌ No "${which}/${PACKAGE_JSON}" found`));
 
     if (failOnError) {
       process.exit(1);
     }
 
-    return { path: '' } as PathAndPackageRecord;
+    return { path: '', raw: '' } as PackageJsonRecord;
   }
 };
 
 const getPackageDirs = async () => {
-  const packagesDir = path.relative(process.cwd(), APPS_DIR);
   try {
-    const dirs = await readdir(packagesDir, {
+    const dirs = await readdir(APPS_DIR, {
       encoding: 'utf8',
       withFileTypes: true
     });
@@ -76,85 +83,76 @@ const getPackageDirs = async () => {
   }
 };
 
-const toPackageJSONString = (pkg: Record<string, unknown>) => {
-  return `${JSON.stringify(pkg, null, 2)}\n`;
-};
-
-const getPathKey = (name: string) => {
-  if (/^discord/i.test(name)) {
-    return 'discord';
-  } else if (/^vscode/i.test(name)) {
-    return 'extension';
-  } else if (/^relay/i.test(name)) {
-    return 'relay';
+const toPackageRelativeTarget = (packageDir: string, target: string) => {
+  if (!target.startsWith(`./${APPS_DIR}/`)) {
+    return target;
   }
 
-  return name;
+  const absoluteTarget = path.resolve(process.cwd(), target);
+  const relativeTarget = path
+    .relative(packageDir, absoluteTarget)
+    .replace(/\\/g, '/');
+
+  return relativeTarget.startsWith('.')
+    ? relativeTarget
+    : `./${relativeTarget}`;
+};
+
+const toPackageRelativeImports = (
+  packageJsonPath: string,
+  imports: ImportsMap
+): ImportsMap => {
+  const packageDir = path.dirname(packageJsonPath);
+
+  return Object.fromEntries(
+    Object.entries(imports).map(([key, value]) => {
+      if (typeof value === 'string') {
+        return [key, toPackageRelativeTarget(packageDir, value)];
+      }
+
+      if (typeof value === 'object' && value !== null) {
+        return [
+          key,
+          Object.fromEntries(
+            Object.entries(value).map(([subKey, subValue]) => [
+              subKey,
+              toPackageRelativeTarget(packageDir, subValue)
+            ])
+          )
+        ];
+      }
+
+      return [key, value];
+    })
+  ) as ImportsMap;
 };
 
 async function mirrorImportsToPathsInTSConfig() {
   const { imports = {} } = await getPackageJson('root');
   const paths: Record<string, string[]> = {};
 
-const toPackageRelativeImportTarget = (
-  packageDir: string,
-  target: string
-) => {
-  if (!target.startsWith(`./${APPS_DIR}/`)) {
-    return target;
-  }
-
-  const targetFromRoot = target.replace(/^\.\//, '');
-  const relativeTarget = path.relative(packageDir, targetFromRoot);
-
-  if (relativeTarget.startsWith('.')) {
-    return relativeTarget;
-  }
-
-  return `./${relativeTarget}`;
-};
-
-const toPackageRelativeImports = (packageDir: string, imports: ImportsMap) => {
-  const entries = Object.entries(imports).map(([key, value]) => {
-    if (typeof value === 'string') {
-      return [key, toPackageRelativeImportTarget(packageDir, value)];
-    }
-
-    if (typeof value === 'object' && value !== null) {
-      const nextValue = Object.fromEntries(
-        Object.entries(value).map(([subKey, subValue]) => [
-          subKey,
-          toPackageRelativeImportTarget(packageDir, subValue)
-        ])
-      );
-
-      return [key, nextValue];
-    }
-
-    return [key, value];
-  });
-
-  return Object.fromEntries(entries) as ImportsMap;
-};
   for (const [key, value] of Object.entries(imports)) {
-    if (!key.startsWith('#')) continue;
+    if (!key.startsWith('#')) {
+      continue;
+    }
 
     const tsPath =
       typeof value === 'string'
         ? value
-        : typeof value === 'object'
+        : typeof value === 'object' && value !== null
           ? value.default
           : null;
 
-    if (!tsPath) continue;
+    if (!tsPath) {
+      continue;
+    }
 
     paths[key] = [tsPath.replace(/^\.\//, '')];
   }
 
-  const outputPath = path.relative(process.cwd(), tsConfigPathsJson);
   const config = { compilerOptions: { paths } };
-  await writeFile(outputPath, toPackageJSONString(config));
-  console.log(`📝 Updated config file: ${pc.cyan(outputPath)}`);
+  await writeFile(TS_CONFIG_PATHS_JSON, toPackageJSONString(config));
+  console.log(`📝 Updated config file: ${pc.cyan(TS_CONFIG_PATHS_JSON)}`);
 }
 
 async function generateImportsFromPackages() {
@@ -163,22 +161,19 @@ async function generateImportsFromPackages() {
   const imports: ImportsMap = {};
 
   for (const dir of dirs) {
-    const name = dir.name;
-    const key = getPathKey(name);
-
-    imports[`#${key}/*`] = `./${APPS_DIR}/${name}/src/*`;
+    imports[`#${getPathKey(dir.name)}/*`] = `./${APPS_DIR}/${dir.name}/src/*`;
   }
 
   pkg.imports = { ...pkg.imports, ...imports };
 
   const next = toPackageJSONString(pkg);
-
-      pkg.imports = { ...pkg.imports, ...packageImports };
+  if (next !== raw) {
     await writeFile(pkgPath, next);
     console.log(`ℹ️  ${pc.cyan('Generated root import aliases')}`);
-  } else {
-    console.log(`ℹ️  ${pc.yellow('No changes to root imports, skipping...')}`);
+    return;
   }
+
+  console.log(`ℹ️  ${pc.yellow('No changes to root imports, skipping...')}`);
 }
 
 async function generateExportsForPackages() {
@@ -200,15 +195,15 @@ async function generateExportsForPackages() {
       };
 
       const next = toPackageJSONString(pkg);
-
       if (next !== raw) {
         await writeFile(pkgPath, next);
         console.log(`📦 Generated exports → ${pc.cyan(pkgPath)}`);
-      } else {
-        console.log(
-          `📦 No changes to exports → ${pc.yellow(pkgPath)}, skipping...`
-        );
+        continue;
       }
+
+      console.log(
+        `📦 No changes to exports → ${pc.yellow(pkgPath)}, skipping...`
+      );
     } catch {
       console.log(pc.redBright(`⚠ Failed to write to ${pkgPath}. Skipping...`));
     }
@@ -223,40 +218,21 @@ async function mirrorImportsToPackages() {
   for (const dir of dirs) {
     const pkgDir: WhichPackage = `${APPS_DIR}/${dir.name}`;
     const { path: pkgPath, raw, ...pkg } = await getPackageJson(pkgDir);
-    const packageImports = Object.fromEntries(
-      Object.entries(imports).map(([key, value]) => {
-        const target =
-          typeof value === 'string'
-            ? value
-            : typeof value === 'object'
-              ? value.default
-              : null;
-
-        if (!target) {
-          return [key, value];
-        }
-
-        const absoluteTarget = path.resolve(process.cwd(), target);
-        const relativeTarget = path.relative(
-          path.dirname(pkgPath),
-          absoluteTarget
-        );
-
-        return [key, `./${relativeTarget.replace(/\\/g, '/')}`.replace(/^\.\/\.\//, '../')];
-      })
-    );
 
     try {
-      pkg.imports = { ...pkg.imports, ...packageImports };
+      pkg.imports = {
+        ...pkg.imports,
+        ...toPackageRelativeImports(pkgPath, imports)
+      };
 
       const next = toPackageJSONString(pkg);
-
       if (next !== raw) {
         await writeFile(pkgPath, next);
         console.log(`🔁 Synced imports → ${pc.cyan(pkgPath)}`);
-      } else {
-        console.log(`🔁 Imports already synced → ${pc.yellow(pkgPath)}`);
+        continue;
       }
+
+      console.log(`🔁 Imports already synced → ${pc.yellow(pkgPath)}`);
     } catch {
       console.log(pc.redBright(`⚠ Failed to write ${pkgPath}, skipping...`));
     }
@@ -304,8 +280,11 @@ const result = (() => {
 
 result
   .then(() => {
-    const toFormat = [pkgJson, tsConfigPathsJson, `${APPS_DIR}/*/${pkgJson}`];
-
+    const toFormat = [
+      PACKAGE_JSON,
+      TS_CONFIG_PATHS_JSON,
+      `${APPS_DIR}/*/${PACKAGE_JSON}`
+    ];
     oxfmt.run(toFormat, { debugCommand: false });
   })
   .catch((error) => {
