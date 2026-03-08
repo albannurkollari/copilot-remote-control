@@ -96,6 +96,46 @@ async function mirrorImportsToPathsInTSConfig() {
   const { imports = {} } = await getPackageJson('root');
   const paths: Record<string, string[]> = {};
 
+const toPackageRelativeImportTarget = (
+  packageDir: string,
+  target: string
+) => {
+  if (!target.startsWith(`./${APPS_DIR}/`)) {
+    return target;
+  }
+
+  const targetFromRoot = target.replace(/^\.\//, '');
+  const relativeTarget = path.relative(packageDir, targetFromRoot);
+
+  if (relativeTarget.startsWith('.')) {
+    return relativeTarget;
+  }
+
+  return `./${relativeTarget}`;
+};
+
+const toPackageRelativeImports = (packageDir: string, imports: ImportsMap) => {
+  const entries = Object.entries(imports).map(([key, value]) => {
+    if (typeof value === 'string') {
+      return [key, toPackageRelativeImportTarget(packageDir, value)];
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      const nextValue = Object.fromEntries(
+        Object.entries(value).map(([subKey, subValue]) => [
+          subKey,
+          toPackageRelativeImportTarget(packageDir, subValue)
+        ])
+      );
+
+      return [key, nextValue];
+    }
+
+    return [key, value];
+  });
+
+  return Object.fromEntries(entries) as ImportsMap;
+};
   for (const [key, value] of Object.entries(imports)) {
     if (!key.startsWith('#')) continue;
 
@@ -133,7 +173,7 @@ async function generateImportsFromPackages() {
 
   const next = toPackageJSONString(pkg);
 
-  if (next !== raw) {
+      pkg.imports = { ...pkg.imports, ...packageImports };
     await writeFile(pkgPath, next);
     console.log(`ℹ️  ${pc.cyan('Generated root import aliases')}`);
   } else {
@@ -183,9 +223,31 @@ async function mirrorImportsToPackages() {
   for (const dir of dirs) {
     const pkgDir: WhichPackage = `${APPS_DIR}/${dir.name}`;
     const { path: pkgPath, raw, ...pkg } = await getPackageJson(pkgDir);
+    const packageImports = Object.fromEntries(
+      Object.entries(imports).map(([key, value]) => {
+        const target =
+          typeof value === 'string'
+            ? value
+            : typeof value === 'object'
+              ? value.default
+              : null;
+
+        if (!target) {
+          return [key, value];
+        }
+
+        const absoluteTarget = path.resolve(process.cwd(), target);
+        const relativeTarget = path.relative(
+          path.dirname(pkgPath),
+          absoluteTarget
+        );
+
+        return [key, `./${relativeTarget.replace(/\\/g, '/')}`.replace(/^\.\/\.\//, '../')];
+      })
+    );
 
     try {
-      pkg.imports = { ...pkg.imports, ...imports };
+      pkg.imports = { ...pkg.imports, ...packageImports };
 
       const next = toPackageJSONString(pkg);
 
