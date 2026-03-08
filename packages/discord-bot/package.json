@@ -19,12 +19,17 @@
     }
   },
   "scripts": {
-    "dev": "node src/index.ts",
+    "dev": "node src/bot.ts",
     "build": "tsup",
     "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@remote-copilot/shared": "workspace:*"
+    "@remote-copilot/shared": "workspace:*",
+    "discord.js": "^14.24.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
   }
 }
