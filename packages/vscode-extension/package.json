@@ -2,10 +2,22 @@
   "name": "@remote-copilot/vscode-extension",
   "version": "0.0.1",
   "private": true,
+  "displayName": "Remote Copilot Bridge",
+  "description": "Bridge Discord prompts to GitHub Copilot through a WebSocket relay.",
   "files": [
     "dist"
   ],
   "type": "module",
+  "main": "./dist/extension.js",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "engines": {
+    "vscode": "^1.105.0"
+  },
   "imports": {
     "#discord/*": "./../discord-bot/src/*",
     "#relay/*": "./../relay-server/src/*",
@@ -19,12 +31,48 @@
     }
   },
   "scripts": {
-    "dev": "node src/index.ts",
+    "dev": "node --eval \"console.log('Run this package in the VS Code extension host during development.')\"",
     "build": "tsup",
     "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@remote-copilot/shared": "workspace:*"
+    "@remote-copilot/shared": "workspace:*",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "vscode": "^1.1.37"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "remoteCopilot.authorizeCopilotAccess",
+        "title": "Remote Copilot: Authorize Copilot Access"
+      },
+      {
+        "command": "remoteCopilot.showRelayOutput",
+        "title": "Remote Copilot: Show Relay Output"
+      },
+      {
+        "command": "remoteCopilot.reconnectRelay",
+        "title": "Remote Copilot: Reconnect Relay"
+      }
+    ],
+    "configuration": {
+      "title": "Remote Copilot",
+      "properties": {
+        "remoteCopilot.clientId": {
+          "type": "string",
+          "default": "default",
+          "description": "Logical client ID used to register this VS Code bridge with the relay server."
+        },
+        "remoteCopilot.relayUrl": {
+          "type": "string",
+          "default": "ws://127.0.0.1:8787/",
+          "description": "WebSocket relay URL used by the remote Copilot bridge."
+        }
+      }
+    }
   }
 }
