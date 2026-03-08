@@ -79,3 +79,4 @@ Continued use of the service after updates are published means you accept the up
 For project-related questions, use the repository issue tracker:
 
 - <https://github.com/albannurkollari/copilot-remote-control/issues>
+
