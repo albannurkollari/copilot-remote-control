@@ -8,9 +8,9 @@
   "type": "module",
   "imports": {
     "#discord/*": "./src/*",
-    "#relay/*": "./../relay-server/src/*",
-    "#shared/*": "./../shared/src/*",
-    "#extension/*": "./../vscode-extension/src/*"
+    "#relay/*": "../relay-server/src/*",
+    "#shared/*": "../shared/src/*",
+    "#extension/*": "../vscode-extension/src/*"
   },
   "exports": {
     ".": {

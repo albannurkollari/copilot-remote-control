@@ -7,10 +7,10 @@
   ],
   "type": "module",
   "imports": {
-    "#discord/*": "./../discord-bot/src/*",
+    "#discord/*": "../discord-bot/src/*",
     "#relay/*": "./src/*",
-    "#shared/*": "./../shared/src/*",
-    "#extension/*": "./../vscode-extension/src/*"
+    "#shared/*": "../shared/src/*",
+    "#extension/*": "../vscode-extension/src/*"
   },
   "exports": {
     ".": {
