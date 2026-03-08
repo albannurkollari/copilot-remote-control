@@ -32,8 +32,9 @@ Default address:
 
 1. Create a Discord application and bot in the Discord Developer Portal
 2. Add your bot credentials to `.env.dev`
-3. Invite the bot to your test server
-4. Start the bot:
+3. Optionally set `DISCORD_APPROVAL_PASSPHRASE` in `.env.dev` to enable passphrase-based session authorization for repeated tool approvals
+4. Invite the bot to your test server
+5. Start the bot:
 
 - `pnpm --filter @remote-copilot/discord-bot dev`
 
@@ -76,6 +77,6 @@ The extension does not read env files directly. Copy these values into VS Code s
 
 ## Current local limitations
 
-- Remote approval for tool calls is not implemented yet
+- Remote approval for tool calls is implemented, but full remote execution behavior still depends on the connected VS Code Copilot agent flow
 - The extension is currently intended for local development use
 - Marketplace packaging is still a future step
