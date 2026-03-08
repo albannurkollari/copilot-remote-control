@@ -1,0 +1,4 @@
+{
+  "remoteCopilot.clientId": "default",
+  "remoteCopilot.relayUrl": "ws://127.0.0.1:8787/"
+}

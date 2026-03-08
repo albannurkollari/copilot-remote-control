@@ -19,15 +19,16 @@
     }
   },
   "scripts": {
-    "dev": "node src/bot.ts",
+    "dev": "node --env-file=../../.env.dev src/bot.ts",
     "build": "tsup",
-    "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
+    "clean": "rm -rfd dist",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run --project @remote-copilot/discord-bot"
   },
   "dependencies": {
     "@remote-copilot/shared": "workspace:*",
     "discord.js": "^14.24.2",
+    "picocolors": "^1.1.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {

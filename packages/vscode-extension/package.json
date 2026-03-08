@@ -27,7 +27,7 @@
   "scripts": {
     "dev": "node --eval \"console.log('Run this package in the VS Code extension host during development.')\"",
     "build": "tsup",
-    "clean": "node --eval \"import('node:fs/promises').then((fs) => fs.rm('dist', { recursive: true, force: true }))\"",
+    "clean": "rm -rfd dist",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
