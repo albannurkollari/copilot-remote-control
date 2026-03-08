@@ -38,7 +38,7 @@ export class Runner {
       const stdout = execSync(cmd, {
         encoding: 'utf-8', // gives you a string instead of a Buffer
         stdio: 'pipe', // default; ensures capture, no live printing
-        shell: 'bash',
+        shell: 'bash'
       });
 
       if (isLogEnabled(logOptions, 'out')) {
@@ -49,7 +49,7 @@ export class Runner {
         ok: true,
         code: 0,
         stdout,
-        stderr: '',
+        stderr: ''
       };
     } catch (err) {
       const result = err as SpawnSyncReturns<string>;
@@ -67,7 +67,7 @@ export class Runner {
         ok: false,
         code: result.status ?? 1,
         stdout,
-        stderr,
+        stderr
       };
     }
   }
@@ -76,7 +76,7 @@ export class Runner {
 export class CommandBuilder<
   Main extends string,
   Subs extends string,
-  Flags extends string = string,
+  Flags extends string = string
 > extends Runner {
   #parts: Array<Main | Subs | Flags | (string & {})> = [];
   #main: Main;
@@ -100,7 +100,7 @@ export class CommandBuilder<
           return this;
         },
         configurable: false,
-        enumerable: true,
+        enumerable: true
       });
     });
   }
@@ -138,7 +138,7 @@ export class CommandBuilder<
 export const createCommand = <
   Main extends string,
   Subs extends string,
-  Flags extends string = string,
+  Flags extends string = string
 >(
   ...args: ConstructorParameters<typeof CommandBuilder<Main, Subs, Flags>>
 ) => {

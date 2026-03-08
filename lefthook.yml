@@ -8,6 +8,6 @@ pre-push:
       run: |
         pnpm fmt
         git diff --quiet
-      fail_text: "Code is not formatted! Stage and commit the changes."
+      fail_text: 'Code is not formatted! Stage and commit the changes.'
 # post-commit:
 #   commands:

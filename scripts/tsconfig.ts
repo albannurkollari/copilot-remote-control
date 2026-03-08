@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import pc from 'picocolors';
 import { CommandBuilder, ProcessState } from './commands.ts';
-import { readdir } from 'node:fs/promises';
 
 const APPS_DIR = 'packages';
 const pkgJson = 'package.json';
@@ -17,7 +17,7 @@ type WhichPackage = 'root' | `${typeof APPS_DIR}/${string}`;
 
 const getPackageJson = async (
   which: WhichPackage = 'root',
-  failOnError = true,
+  failOnError = true
 ) => {
   type PathAndPackageRecord = {
     imports?: ImportsMap;
@@ -44,7 +44,7 @@ const getPackageJson = async (
     return {
       ...JSON.parse(pkgRaw),
       path: pkgPath,
-      raw: pkgRaw,
+      raw: pkgRaw
     } as PathAndPackageRecord;
   } catch {
     console.log(pc.yellow(`⚠ Skipping "${which}/${pkgJson}" or`));
@@ -63,14 +63,14 @@ const getPackageDirs = async () => {
   try {
     const dirs = await readdir(packagesDir, {
       encoding: 'utf8',
-      withFileTypes: true,
+      withFileTypes: true
     });
 
     return dirs.filter((dir) => dir.isDirectory());
   } catch (error) {
     console.error(
       `Something went wrong reading the "${APPS_DIR}" directory:`,
-      error,
+      error
     );
     process.exit(1);
   }
@@ -155,8 +155,8 @@ async function generateExportsForPackages() {
       pkg.exports = {
         '.': {
           types: './dist/index.d.ts',
-          default: './dist/index.js',
-        },
+          default: './dist/index.js'
+        }
       };
 
       const next = toPackageJSONString(pkg);
@@ -166,7 +166,7 @@ async function generateExportsForPackages() {
         console.log(`📦 Generated exports → ${pc.cyan(pkgPath)}`);
       } else {
         console.log(
-          `📦 No changes to exports → ${pc.yellow(pkgPath)}, skipping...`,
+          `📦 No changes to exports → ${pc.yellow(pkgPath)}, skipping...`
         );
       }
     } catch {
@@ -214,7 +214,7 @@ const result = (() => {
     '--generateImportsFromPackages',
     '--mirrorImportsToPackages',
     '--mirrorImportsToPaths',
-    '--syncAliases',
+    '--syncAliases'
   );
 
   if (state.flags.syncAliases) {
