@@ -1,23 +1,17 @@
 {
   "name": "@remote-copilot/vscode-extension",
+  "displayName": "Remote Copilot Bridge",
   "version": "0.0.1",
   "private": true,
-  "displayName": "Remote Copilot Bridge",
   "description": "Bridge Discord prompts to GitHub Copilot through a WebSocket relay.",
+  "categories": [
+    "Other"
+  ],
   "files": [
     "dist"
   ],
   "type": "module",
   "main": "./dist/extension.js",
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "engines": {
-    "vscode": "^1.105.0"
-  },
   "imports": {
     "#discord/*": "./../discord-bot/src/*",
     "#relay/*": "./../relay-server/src/*",
@@ -74,5 +68,11 @@
         }
       }
     }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "engines": {
+    "vscode": "^1.105.0"
   }
 }
