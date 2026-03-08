@@ -1,4 +1,4 @@
-import { setTimeout as delay } from 'node:timers/promises';
+import { EventEmitter } from 'node:events';
 
 import {
 	parseRelayMessage,
@@ -7,244 +7,253 @@ import {
 	type CopilotStreamMessage,
 	type PermissionRequestMessage,
 	type PermissionResponseMessage,
-	type RelayStatusMessage,
-	type RegisterAckMessage
+	type RegisterAckMessage,
+	type RelayStatusMessage
 } from '@remote-copilot/shared';
-import WebSocket from 'ws';
+import { WebSocket } from 'ws';
 
-export interface DiscordRelayClientOptions {
+export interface RelayDiscordClientOptions {
 	clientId: string;
 	reconnectDelayMs?: number;
-	url: string;
+	relayUrl: string;
 }
 
-export interface RelayRequestHandlers {
+export interface PromptRequestHandlers {
 	onPermissionRequest?: (message: PermissionRequestMessage) => void | Promise<void>;
 	onStatus?: (message: RelayStatusMessage) => void | Promise<void>;
 	onStream?: (message: CopilotStreamMessage) => void | Promise<void>;
 }
 
-interface PendingRequest {
-	handlers: RelayRequestHandlers;
+interface PendingPromptRequest extends PromptRequestHandlers {
+	reject: (error: Error) => void;
+	resolve: () => void;
 }
 
-const DEFAULT_RECONNECT_DELAY_MS = 1_500;
-const DEFAULT_READY_TIMEOUT_MS = 10_000;
+type RelayClientEvents = {
+	connected: [];
+	disconnected: [];
+	status: [RelayStatusMessage];
+};
 
-export class DiscordRelayClient {
+export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
 	readonly clientId: string;
-	readonly url: string;
+	readonly reconnectDelayMs: number;
+	readonly relayUrl: string;
 
-	#reconnectDelayMs: number;
-	#socket?: WebSocket;
-	#pendingRequests = new Map<string, PendingRequest>();
-	#statusListeners = new Set<(message: RelayStatusMessage) => void | Promise<void>>();
-	#readyPromise: Promise<void> | null = null;
-	#resolveReady?: () => void;
-	#shouldReconnect = true;
+	#connectPromise?: Promise<void>;
+	#isStopping = false;
+	#pendingRequests = new Map<string, PendingPromptRequest>();
 	#reconnectTimer?: NodeJS.Timeout;
-	#isReady = false;
+	#registerAck?: RegisterAckMessage;
+	#socket?: WebSocket;
 
-	constructor(options: DiscordRelayClientOptions) {
+	constructor(options: RelayDiscordClientOptions) {
+		super();
 		this.clientId = options.clientId;
-		this.url = options.url;
-		this.#reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+		this.reconnectDelayMs = options.reconnectDelayMs ?? 2_000;
+		this.relayUrl = options.relayUrl;
 	}
 
-	get isReady() {
-		return this.#isReady;
+	get isConnected() {
+		return this.#socket?.readyState === WebSocket.OPEN && this.#registerAck !== undefined;
 	}
 
 	async connect() {
-		this.#shouldReconnect = true;
-
-		if (this.#socket && (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING)) {
+		if (this.isConnected) {
 			return;
 		}
 
-		this.#readyPromise = new Promise<void>((resolve) => {
-			this.#resolveReady = resolve;
-		});
+		if (this.#connectPromise) {
+			return this.#connectPromise;
+		}
 
-		const socket = new WebSocket(this.url);
-		this.#socket = socket;
+		this.#isStopping = false;
+		this.#connectPromise = new Promise<void>((resolve, reject) => {
+			const socket = new WebSocket(this.relayUrl);
+			let settled = false;
 
-		socket.on('open', () => {
-			this.#sendRaw({
-				type: 'register',
-				clientId: this.clientId,
-				clientRole: 'discord'
+			const fail = (error: Error) => {
+				if (settled) {
+					return;
+				}
+
+				settled = true;
+				this.#connectPromise = undefined;
+				reject(error);
+			};
+
+			const succeed = (ack: RegisterAckMessage) => {
+				if (settled) {
+					return;
+				}
+
+				settled = true;
+				this.#registerAck = ack;
+				this.#connectPromise = undefined;
+				this.emit('connected');
+				resolve();
+			};
+
+			socket.once('open', () => {
+				this.#socket = socket;
+				socket.send(
+					serializeRelayMessage({
+						type: 'register',
+						clientId: this.clientId,
+						clientRole: 'discord'
+					})
+				);
+			});
+
+			socket.on('message', (data) => {
+				void this.#handleMessage(data.toString(), {
+					onRegisterAck: succeed
+				});
+			});
+
+			socket.once('close', () => {
+				this.#handleDisconnect();
+				if (!settled) {
+					fail(new Error('Relay connection closed before registration completed.'));
+				}
+			});
+
+			socket.once('error', (error) => {
+				this.#handleDisconnect();
+				if (!settled) {
+					fail(error instanceof Error ? error : new Error(String(error)));
+				}
 			});
 		});
 
-		socket.on('message', (data) => {
-			void this.#handleMessage(data.toString());
-		});
-
-		socket.on('close', () => {
-			this.#handleDisconnect();
-		});
-
-		socket.on('error', () => {
-			this.#handleDisconnect();
-		});
-
-		await this.waitForReady();
+		return this.#connectPromise;
 	}
 
 	async disconnect() {
-		this.#shouldReconnect = false;
+		this.#isStopping = true;
+		this.#registerAck = undefined;
+		this.#connectPromise = undefined;
+
 		if (this.#reconnectTimer) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
 		}
 
-		this.#rejectPendingRequests('Relay connection closed.');
-
-		if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
+		if (this.#socket) {
+			for (const pending of this.#pendingRequests.values()) {
+				pending.reject(new Error('Relay connection was closed.'));
+			}
+			this.#pendingRequests.clear();
 			this.#socket.close();
+			this.#socket = undefined;
 		}
 	}
 
-	async waitForReady(timeoutMs = DEFAULT_READY_TIMEOUT_MS) {
-		if (this.#isReady) {
-			return;
-		}
+	async sendPrompt(message: CopilotPromptMessage, handlers: PromptRequestHandlers = {}) {
+		await this.connect();
 
-		if (!this.#readyPromise) {
-			throw new Error('Relay client is not connecting.');
-		}
-
-		await Promise.race([
-			this.#readyPromise,
-			delay(timeoutMs).then(() => {
-				throw new Error(`Timed out waiting for relay readiness after ${timeoutMs}ms.`);
-			})
-		]);
-	}
-
-	onStatus(listener: (message: RelayStatusMessage) => void | Promise<void>) {
-		this.#statusListeners.add(listener);
-
-		return () => {
-			this.#statusListeners.delete(listener);
-		};
-	}
-
-	async sendPrompt(message: CopilotPromptMessage, handlers: RelayRequestHandlers = {}) {
-		await this.waitForReady();
-		this.#pendingRequests.set(message.requestId, { handlers });
-		this.#sendRaw(message);
-	}
-
-	sendPermissionResponse(message: PermissionResponseMessage) {
-		this.#sendRaw(message);
-	}
-
-	#sendRaw(message: RegisterAckMessage | CopilotPromptMessage | PermissionResponseMessage | { type: 'register'; clientId: string; clientRole: 'discord' }) {
 		if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
-			throw new Error('Relay connection is not open.');
+			throw new Error('Relay connection is not available.');
 		}
 
-		this.#socket.send(serializeRelayMessage(message));
+		return await new Promise<void>((resolve, reject) => {
+			this.#pendingRequests.set(message.requestId, { ...handlers, reject, resolve });
+			this.#socket?.send(serializeRelayMessage(message));
+		});
 	}
 
-	async #handleMessage(raw: string) {
+	respondToPermissionRequest(message: PermissionRequestMessage, approved: boolean, reason?: string) {
+		if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
+			throw new Error('Relay connection is not available.');
+		}
+
+		const response: PermissionResponseMessage = {
+			type: 'permission_response',
+			clientId: message.clientId,
+			requestId: message.requestId,
+			permissionId: message.permissionId,
+			approved,
+			reason
+		};
+
+		this.#socket.send(serializeRelayMessage(response));
+	}
+
+	async #handleMessage(
+		raw: string,
+		options: { onRegisterAck?: (ack: RegisterAckMessage) => void } = {}
+	) {
 		const parsed = parseRelayMessage(raw);
 		if (!parsed.ok) {
+			throw new Error(parsed.error);
+		}
+
+		const message = parsed.value;
+		if (message.type === 'register_ack') {
+			options.onRegisterAck?.(message);
 			return;
 		}
 
-		switch (parsed.value.type) {
-			case 'register_ack':
-				this.#isReady = true;
-				this.#resolveReady?.();
-				return;
+		if (message.type === 'relay_status') {
+			this.emit('status', message);
+			const pending = message.requestId ? this.#pendingRequests.get(message.requestId) : undefined;
+			await pending?.onStatus?.(message);
 
-			case 'copilot_stream': {
-				const request = this.#pendingRequests.get(parsed.value.requestId);
-				await request?.handlers.onStream?.(parsed.value);
+			if (message.level === 'error' && message.requestId && pending) {
+				this.#pendingRequests.delete(message.requestId);
+				pending.reject(new Error(message.message));
+			}
 
-				if (parsed.value.done) {
-					this.#pendingRequests.delete(parsed.value.requestId);
-				}
+			return;
+		}
 
+		if ('requestId' in message) {
+			const pending = this.#pendingRequests.get(message.requestId);
+			if (!pending) {
 				return;
 			}
 
-			case 'permission_request': {
-				const request = this.#pendingRequests.get(parsed.value.requestId);
-				await request?.handlers.onPermissionRequest?.(parsed.value);
-				return;
-			}
-
-			case 'relay_status': {
-				if (parsed.value.requestId) {
-					const request = this.#pendingRequests.get(parsed.value.requestId);
-					await request?.handlers.onStatus?.(parsed.value);
-
-					if (parsed.value.level === 'error') {
-						this.#pendingRequests.delete(parsed.value.requestId);
+			if (message.type === 'copilot_stream') {
+				await pending.onStream?.(message);
+				if (message.done) {
+					this.#pendingRequests.delete(message.requestId);
+					if (message.error) {
+						pending.reject(new Error(message.error));
+					} else {
+						pending.resolve();
 					}
 				}
-
-				for (const listener of this.#statusListeners) {
-					await listener(parsed.value);
-				}
-
 				return;
 			}
 
-			default:
-				return;
+			if (message.type === 'permission_request') {
+				await pending.onPermissionRequest?.(message);
+			}
 		}
 	}
 
 	#handleDisconnect() {
-		this.#isReady = false;
-		this.#rejectPendingRequests('Relay connection lost while awaiting a Copilot response.');
+		this.#registerAck = undefined;
+		this.#connectPromise = undefined;
+		this.#socket = undefined;
+		this.emit('disconnected');
 
-		if (!this.#shouldReconnect || this.#reconnectTimer) {
+		for (const [requestId, pending] of this.#pendingRequests.entries()) {
+			this.#pendingRequests.delete(requestId);
+			pending.reject(new Error('Relay connection was interrupted.'));
+		}
+
+		if (this.#isStopping) {
 			return;
 		}
 
-		this.#readyPromise = new Promise<void>((resolve) => {
-			this.#resolveReady = resolve;
-		});
-
-		this.#reconnectTimer = setTimeout(() => {
-			this.#reconnectTimer = undefined;
-			void this.connect().catch(() => {
-				void this.#scheduleReconnect();
-			});
-		}, this.#reconnectDelayMs);
-	}
-
-	async #scheduleReconnect() {
-		if (!this.#shouldReconnect || this.#reconnectTimer) {
-			return;
+		if (this.#reconnectTimer) {
+			clearTimeout(this.#reconnectTimer);
 		}
 
 		this.#reconnectTimer = setTimeout(() => {
 			this.#reconnectTimer = undefined;
-			void this.connect().catch(() => {
-				void this.#scheduleReconnect();
-			});
-		}, this.#reconnectDelayMs);
-	}
-
-	#rejectPendingRequests(message: string) {
-		const pendingRequests = [...this.#pendingRequests.entries()];
-		this.#pendingRequests.clear();
-
-		for (const [requestId, request] of pendingRequests) {
-			void request.handlers.onStatus?.({
-				type: 'relay_status',
-				level: 'error',
-				code: 'target_not_connected',
-				message,
-				requestId
-			});
-		}
+			void this.connect().catch(() => undefined);
+		}, this.reconnectDelayMs);
 	}
 }

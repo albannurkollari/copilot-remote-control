@@ -1,111 +1,220 @@
-import process from 'node:process';
+import {
+	Client,
+	Events,
+	GatewayIntentBits,
+	REST,
+	Routes,
+	type ChatInputCommandInteraction
+} from 'discord.js';
 
-import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
+import {
+	buildCopilotPromptMessage,
+	COPILOT_COMMAND_NAME,
+	createCopilotCommand,
+	parseCopilotCommand
+} from './commands/copilot.js';
+import { RelayDiscordClient, type RelayDiscordClientOptions } from './relayClient.js';
 
-import { copilotCommand, handleCopilotCommand } from './commands/copilot.js';
-import { DiscordRelayClient } from './relayClient.js';
-
-export interface DiscordBotConfig {
+export interface DiscordBotConfig extends RelayDiscordClientOptions {
 	applicationId: string;
-	botToken: string;
 	guildId: string;
-	relayClientId: string;
-	relayUrl: string;
-	streamUpdateIntervalMs: number;
+	token: string;
 	targetClientId: string;
+	updateIntervalMs?: number;
+}
+
+class BufferedReply {
+	#buffer = '';
+	#dirty = false;
+	#finalized = false;
+	#flushTimer?: NodeJS.Timeout;
+	#notes: string[] = [];
+
+	constructor(
+		private readonly interaction: ChatInputCommandInteraction,
+		private readonly updateIntervalMs: number
+	) {}
+
+	async start() {
+		await this.interaction.deferReply();
+		await this.interaction.editReply('Processing…');
+	}
+
+	append(text: string) {
+		if (!text) {
+			return;
+		}
+
+		this.#buffer += text;
+		this.#dirty = true;
+		this.#scheduleFlush();
+	}
+
+	addNote(note: string) {
+		this.#notes.push(note);
+		this.#dirty = true;
+		this.#scheduleFlush();
+	}
+
+	async fail(message: string) {
+		this.addNote(`Error: ${message}`);
+		await this.finish();
+	}
+
+	async finish() {
+		if (this.#finalized) {
+			return;
+		}
+
+		this.#finalized = true;
+		if (this.#flushTimer) {
+			clearTimeout(this.#flushTimer);
+			this.#flushTimer = undefined;
+		}
+
+		await this.#flush(true);
+	}
+
+	#scheduleFlush() {
+		if (this.#flushTimer || this.#finalized) {
+			return;
+		}
+
+		this.#flushTimer = setTimeout(() => {
+			void this.#flush();
+		}, this.updateIntervalMs);
+	}
+
+	async #flush(force = false) {
+		if (!force && !this.#dirty) {
+			this.#flushTimer = undefined;
+			return;
+		}
+
+		this.#dirty = false;
+		this.#flushTimer = undefined;
+
+		const notes = this.#notes.length > 0 ? `\n\n${this.#notes.map((note) => `• ${note}`).join('\n')}` : '';
+		const body = this.#buffer.trim().length > 0 ? this.#buffer : 'Processing…';
+		const content = `${body}${notes}`;
+		const safeContent = content.length > 1_950 ? `${content.slice(0, 1_930)}\n\n…truncated` : content;
+
+		await this.interaction.editReply(safeContent);
+	}
 }
 
 export const loadDiscordBotConfig = (): DiscordBotConfig => {
-	const {
-		DISCORD_APPLICATION_ID,
-		DISCORD_GUILD_ID,
-		DISCORD_RELAY_CLIENT_ID,
-		DISCORD_STREAM_UPDATE_INTERVAL_MS,
-		DISCORD_TOKEN,
-		RELAY_URL,
-		REMOTE_COPILOT_CLIENT_ID
-	} = process.env;
+	const token = process.env.DISCORD_TOKEN;
+	const applicationId = process.env.DISCORD_APPLICATION_ID;
+	const guildId = process.env.DISCORD_GUILD_ID;
+	const relayUrl = process.env.RELAY_URL;
+	const targetClientId = process.env.REMOTE_COPILOT_CLIENT_ID;
 
-	if (!DISCORD_TOKEN || !DISCORD_APPLICATION_ID || !DISCORD_GUILD_ID || !REMOTE_COPILOT_CLIENT_ID) {
+	if (!token || !applicationId || !guildId || !relayUrl || !targetClientId) {
 		throw new Error(
-			'Missing required environment variables. Expected DISCORD_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID, and REMOTE_COPILOT_CLIENT_ID.'
+			'Missing required Discord bot configuration. Expected DISCORD_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID, RELAY_URL, and REMOTE_COPILOT_CLIENT_ID.'
 		);
 	}
 
-	const interval = Number.parseInt(DISCORD_STREAM_UPDATE_INTERVAL_MS ?? '1200', 10);
+	return {
+		applicationId,
+		clientId: 'discord-bot',
+		guildId,
+		relayUrl,
+		targetClientId,
+		token,
+		updateIntervalMs: Number.parseInt(process.env.DISCORD_STREAM_UPDATE_MS ?? '1200', 10)
+	};
+};
+
+export const registerGuildCommands = async (config: Pick<DiscordBotConfig, 'applicationId' | 'guildId' | 'token'>) => {
+	const rest = new REST({ version: '10' }).setToken(config.token);
+	await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), {
+		body: [createCopilotCommand().toJSON()]
+	});
+};
+
+export const handleCopilotInteraction = async (
+	interaction: ChatInputCommandInteraction,
+	relayClient: RelayDiscordClient,
+	config: Pick<DiscordBotConfig, 'targetClientId' | 'updateIntervalMs'>
+) => {
+	const input = parseCopilotCommand(interaction);
+	const reply = new BufferedReply(interaction, config.updateIntervalMs ?? 1_200);
+	await reply.start();
+
+	const promptMessage = buildCopilotPromptMessage(input, {
+		clientId: config.targetClientId,
+		channelId: interaction.channelId,
+		messageId: interaction.id,
+		threadId: interaction.channel?.isThread() ? interaction.channelId : undefined,
+		userDisplayName: interaction.user.globalName ?? interaction.user.username
+	});
+
+	try {
+		await relayClient.sendPrompt(promptMessage, {
+			onPermissionRequest: async (message) => {
+				reply.addNote(`Permission request denied: ${message.title}`);
+				relayClient.respondToPermissionRequest(message, false, 'Remote approval is not implemented yet.');
+			},
+			onStatus: async (message) => {
+				if (message.level !== 'info') {
+					reply.addNote(`Relay ${message.level}: ${message.message}`);
+				}
+			},
+			onStream: async (message) => {
+				if (message.delta) {
+					reply.append(message.delta);
+				}
+
+				if (message.error) {
+					reply.addNote(message.error);
+				}
+			}
+		});
+
+		await reply.finish();
+	} catch (error) {
+		await reply.fail(error instanceof Error ? error.message : String(error));
+	}
+};
+
+export const createDiscordBot = (config: DiscordBotConfig) => {
+	const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+	const relayClient = new RelayDiscordClient({
+		clientId: config.clientId,
+		relayUrl: config.relayUrl,
+		reconnectDelayMs: config.reconnectDelayMs
+	});
+
+	client.once(Events.ClientReady, async () => {
+		await registerGuildCommands(config);
+		await relayClient.connect();
+		process.stdout.write(`Discord bot ready as ${client.user?.tag ?? 'unknown'}\n`);
+	});
+
+	client.on(Events.InteractionCreate, async (interaction) => {
+		if (!interaction.isChatInputCommand() || interaction.commandName !== COPILOT_COMMAND_NAME) {
+			return;
+		}
+
+		await handleCopilotInteraction(interaction, relayClient, config);
+	});
 
 	return {
-		applicationId: DISCORD_APPLICATION_ID,
-		botToken: DISCORD_TOKEN,
-		guildId: DISCORD_GUILD_ID,
-		relayClientId: DISCORD_RELAY_CLIENT_ID ?? 'discord-bot',
-		relayUrl: RELAY_URL ?? 'ws://127.0.0.1:8787/',
-		streamUpdateIntervalMs: Number.isNaN(interval) ? 1200 : interval,
-		targetClientId: REMOTE_COPILOT_CLIENT_ID
-	};
-};
-
-export const registerGuildCommands = async (config: DiscordBotConfig) => {
-	const rest = new REST({ version: '10' }).setToken(config.botToken);
-
-	await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), {
-		body: [copilotCommand.toJSON()]
-	});
-};
-
-export const startDiscordBot = async (config = loadDiscordBotConfig()) => {
-	const relayClient = new DiscordRelayClient({
-		clientId: config.relayClientId,
-		url: config.relayUrl
-	});
-
-	await relayClient.connect();
-
-	const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-	relayClient.onStatus((message) => {
-		if (message.requestId) {
-			return;
+		client,
+		relayClient,
+		async start() {
+			await client.login(config.token);
+		},
+		async stop() {
+			await relayClient.disconnect();
+			client.destroy();
 		}
-
-		process.stdout.write(`[relay] ${message.level}: ${message.message}\n`);
-	});
-
-	client.once('ready', async () => {
-		await registerGuildCommands(config);
-		process.stdout.write(`Discord bot ready as ${client.user?.tag ?? 'unknown-user'}\n`);
-	});
-
-	client.on('interactionCreate', async (interaction) => {
-		if (!interaction.isChatInputCommand() || interaction.commandName !== 'copilot') {
-			return;
-		}
-
-		await handleCopilotCommand(interaction, {
-			relayClient,
-			streamUpdateIntervalMs: config.streamUpdateIntervalMs,
-			targetClientId: config.targetClientId
-		});
-	});
-
-	await client.login(config.botToken);
-
-	const shutdown = async () => {
-		await relayClient.disconnect();
-		await client.destroy();
-		process.exit(0);
 	};
-
-	process.once('SIGINT', () => {
-		void shutdown();
-	});
-	process.once('SIGTERM', () => {
-		void shutdown();
-	});
-
-	return { client, relayClient };
 };
 
 if (import.meta.url === new URL(process.argv[1] ?? '', 'file:').href) {
-	await startDiscordBot();
+	const bot = createDiscordBot(loadDiscordBotConfig());
+	await bot.start();
 }
