@@ -17,10 +17,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      oxfmt:
-        specifier: ^0.36.0
-        version: 0.36.0
     devDependencies:
       '@semantic-release/commit-analyzer':
         specifier: ^13.0.1
@@ -49,6 +45,9 @@ importers:
       lefthook:
         specifier: ^2.1.3
         version: 2.1.3
+      oxfmt:
+        specifier: ^0.36.0
+        version: 0.36.0
       oxlint:
         specifier: ^1.51.0
         version: 1.51.0
