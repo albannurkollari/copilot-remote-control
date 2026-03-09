@@ -1,20 +1,19 @@
 import {
-  createPongMessage,
-  parseRelayMessage,
-  serializeRelayMessage,
-  type ClientRole,
-  type CopilotPromptMessage,
-  type CopilotStreamMessage,
-  type PermissionRequestMessage,
-  type PermissionResponseMessage,
-  type RegisterMessage,
-  type RelayMessage,
-  type RelayStatusCode,
-  type RelayStatusLevel
+    createPongMessage,
+    parseRelayMessage,
+    serializeRelayMessage,
+    type ClientRole,
+    type CopilotPromptMessage,
+    type CopilotStreamMessage,
+    type PermissionRequestMessage,
+    type PermissionResponseMessage,
+    type RegisterMessage,
+    type RelayMessage,
+    type RelayStatusCode,
+    type RelayStatusLevel
 } from '@remote-copilot/shared';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';
-import { pathToFileURL } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
@@ -593,9 +592,3 @@ export const startRelayServer = async (
   await server.start();
   return server;
 };
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const server = await startRelayServer();
-
-  process.stdout.write(`Relay server listening on ${server.address}\n`);
-}

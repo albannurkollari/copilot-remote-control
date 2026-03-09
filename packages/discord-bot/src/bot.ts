@@ -15,7 +15,6 @@ import {
   type ChatInputCommandInteraction,
   type Message
 } from 'discord.js';
-import { pathToFileURL } from 'node:url';
 import pc from 'picocolors';
 
 import {
@@ -723,8 +722,3 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
     }
   };
 };
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const bot = createDiscordBot(loadDiscordBotConfig());
-  await bot.start();
-}

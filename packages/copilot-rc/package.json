@@ -42,6 +42,7 @@
   "scripts": {
     "dev": "node src/index.ts",
     "build": "tsup",
+    "smoke:built": "pnpm run build && node dist/index.js init --help",
     "clean": "rm -rfd dist",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node --eval \"console.log('No tests yet for copilot-rc.')\""
@@ -49,11 +50,11 @@
   "dependencies": {
     "commander": "^14.0.1",
     "discord.js": "^14.25.1",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
-    "ws": "^8.19.0"
+    "@types/ws": "^8.18.1"
   },
   "engines": {
     "node": ">=24"
