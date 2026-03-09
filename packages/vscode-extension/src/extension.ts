@@ -76,6 +76,12 @@ const clearTranscripts = async (context: vscode.ExtensionContext) => {
   await context.globalState.update(TRANSCRIPT_STORAGE_KEY, []);
 };
 
+const fenceFor = (content: string): string => {
+  const runs = content.match(/`+/g) ?? [];
+  const max = runs.reduce((n, r) => Math.max(n, r.length), 0);
+  return '`'.repeat(Math.max(max + 1, 3));
+};
+
 const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
   if (entries.length === 0) {
     return [
@@ -111,6 +117,11 @@ const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
               ];
             });
 
+      const promptFence = fenceFor(entry.prompt);
+      const responseFence = fenceFor(
+        entry.response.length > 0 ? entry.response : '(no response text)'
+      );
+
       return [
         `## ${entry.requestId}`,
         '',
@@ -123,9 +134,9 @@ const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
         '',
         '### Prompt',
         '',
-        '```text',
+        `${promptFence}text`,
         entry.prompt,
-        '```',
+        promptFence,
         '',
         '### Permissions',
         '',
@@ -133,9 +144,9 @@ const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
         '',
         '### Response',
         '',
-        '```text',
+        `${responseFence}text`,
         entry.response.length > 0 ? entry.response : '(no response text)',
-        '```',
+        responseFence,
         ''
       ];
     })
