@@ -49,6 +49,14 @@
         "title": "Remote Copilot: Show Relay Output"
       },
       {
+        "command": "remoteCopilot.showRemoteSessions",
+        "title": "Remote Copilot: Show Remote Sessions"
+      },
+      {
+        "command": "remoteCopilot.clearRemoteSessions",
+        "title": "Remote Copilot: Clear Remote Sessions"
+      },
+      {
         "command": "remoteCopilot.reconnectRelay",
         "title": "Remote Copilot: Reconnect Relay"
       }

@@ -52,7 +52,9 @@ Default address:
 }
 ```
 
-5. Run `Remote Copilot: Authorize Copilot Access`
+- Run `Remote Copilot: Authorize Copilot Access`
+- Later, run `Remote Copilot: Show Remote Sessions` to inspect saved Discord-driven prompt transcripts inside the extension host
+- Run `Remote Copilot: Clear Remote Sessions` to purge the saved transcript history
 
 ## 5. Test the full flow
 
@@ -74,6 +76,9 @@ The extension does not read env files directly. Copy these values into VS Code s
 
 - `remoteCopilot.clientId`
 - `remoteCopilot.relayUrl`
+
+The extension stores the latest remote transcripts in extension global state and shows them through `Remote Copilot: Show Remote Sessions`.
+That state is persisted by VS Code outside the workspace folder, so it survives window reloads and restarts until you clear it.
 
 ## Current local limitations
 

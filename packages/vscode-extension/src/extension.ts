@@ -11,6 +11,33 @@ interface RemoteCopilotConfiguration {
   relayUrl: string;
 }
 
+interface RemotePermissionTranscriptEntry {
+  action: PermissionRequestMessage['action'];
+  approved: boolean;
+  command?: string;
+  details?: string;
+  reason?: string;
+  requestedAt: string;
+  respondedAt: string;
+  title: string;
+}
+
+interface RemoteTranscriptEntry {
+  clientId: string;
+  error?: string;
+  finishedAt: string;
+  mode: CopilotPromptMessage['mode'];
+  permissions: RemotePermissionTranscriptEntry[];
+  prompt: string;
+  requestId: string;
+  response: string;
+  startedAt: string;
+  userDisplayName?: string;
+}
+
+const TRANSCRIPT_STORAGE_KEY = 'remoteCopilot.transcripts';
+const MAX_TRANSCRIPTS = 50;
+
 const loadConfiguration = (): RemoteCopilotConfiguration => {
   const configuration = vscode.workspace.getConfiguration('remoteCopilot');
 
@@ -28,6 +55,91 @@ const toErrorMessage = (error: unknown) => {
   return String(error);
 };
 
+const saveTranscript = async (
+  context: vscode.ExtensionContext,
+  entry: RemoteTranscriptEntry
+) => {
+  const existing = context.globalState.get<RemoteTranscriptEntry[]>(
+    TRANSCRIPT_STORAGE_KEY,
+    []
+  );
+
+  const next = [
+    entry,
+    ...existing.filter((candidate) => candidate.requestId !== entry.requestId)
+  ].slice(0, MAX_TRANSCRIPTS);
+
+  await context.globalState.update(TRANSCRIPT_STORAGE_KEY, next);
+};
+
+const clearTranscripts = async (context: vscode.ExtensionContext) => {
+  await context.globalState.update(TRANSCRIPT_STORAGE_KEY, []);
+};
+
+const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
+  if (entries.length === 0) {
+    return ['# Remote Copilot Sessions', '', 'No saved remote sessions yet.'].join(
+      '\n'
+    );
+  }
+
+  return [
+    '# Remote Copilot Sessions',
+    '',
+    `Stored transcripts: ${entries.length}`,
+    '',
+    ...entries.flatMap((entry) => {
+      const permissions =
+        entry.permissions.length === 0
+          ? ['None']
+          : entry.permissions.flatMap((permission) => {
+              return [
+                `- ${permission.title} (${permission.action})`,
+                `  - Requested: ${permission.requestedAt}`,
+                `  - Decision: ${permission.approved ? 'approved' : 'denied'}`,
+                ...(permission.reason
+                  ? [`  - Reason: ${permission.reason}`]
+                  : []),
+                ...(permission.command
+                  ? [`  - Command: ${permission.command}`]
+                  : []),
+                ...(permission.details
+                  ? [`  - Details: ${permission.details}`]
+                  : [])
+              ];
+            });
+
+      return [
+        `## ${entry.requestId}`,
+        '',
+        `- Started: ${entry.startedAt}`,
+        `- Finished: ${entry.finishedAt}`,
+        `- Mode: ${entry.mode}`,
+        `- Client: ${entry.clientId}`,
+        `- User: ${entry.userDisplayName ?? 'unknown'}`,
+        ...(entry.error ? [`- Error: ${entry.error}`] : []),
+        '',
+        '### Prompt',
+        '',
+        '```text',
+        entry.prompt,
+        '```',
+        '',
+        '### Permissions',
+        '',
+        ...permissions,
+        '',
+        '### Response',
+        '',
+        '```text',
+        entry.response.length > 0 ? entry.response : '(no response text)',
+        '```',
+        ''
+      ];
+    })
+  ].join('\n');
+};
+
 export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Remote Copilot');
   const configuration = loadConfiguration();
@@ -39,6 +151,11 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   const handlePrompt = async (message: CopilotPromptMessage) => {
+    const startedAt = new Date().toISOString();
+    const permissions: RemotePermissionTranscriptEntry[] = [];
+    let errorMessage: string | undefined;
+    let responseText = '';
+
     outputChannel.appendLine(
       `[prompt:${message.requestId}] Received ${message.mode} prompt.`
     );
@@ -46,6 +163,7 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       await bridge.runPrompt(message, {
         onText: async (chunk) => {
+          responseText += chunk;
           await relayClient.sendStream({
             type: 'copilot_stream',
             clientId: message.clientId,
@@ -60,7 +178,21 @@ export async function activate(context: vscode.ExtensionContext) {
           outputChannel.appendLine(
             `[prompt:${message.requestId}] Awaiting permission for ${permissionRequest.action}.`
           );
-          return relayClient.requestPermission(permissionRequest);
+          const requestedAt = new Date().toISOString();
+          const approval = await relayClient.requestPermission(permissionRequest);
+
+          permissions.push({
+            action: permissionRequest.action,
+            approved: approval.approved,
+            command: permissionRequest.command,
+            details: permissionRequest.details,
+            reason: approval.reason,
+            requestedAt,
+            respondedAt: new Date().toISOString(),
+            title: permissionRequest.title
+          });
+
+          return approval;
         }
       });
 
@@ -71,7 +203,7 @@ export async function activate(context: vscode.ExtensionContext) {
         done: true
       });
     } catch (error) {
-      const errorMessage = toErrorMessage(error);
+      errorMessage = toErrorMessage(error);
       outputChannel.appendLine(`[prompt:${message.requestId}] ${errorMessage}`);
 
       await relayClient.sendStream({
@@ -81,6 +213,25 @@ export async function activate(context: vscode.ExtensionContext) {
         done: true,
         error: errorMessage
       });
+    } finally {
+      try {
+        await saveTranscript(context, {
+          clientId: message.clientId,
+          error: errorMessage,
+          finishedAt: new Date().toISOString(),
+          mode: message.mode,
+          permissions,
+          prompt: message.prompt,
+          requestId: message.requestId,
+          response: responseText,
+          startedAt,
+          userDisplayName: message.userDisplayName
+        });
+      } catch (error) {
+        outputChannel.appendLine(
+          `[transcript:error] ${toErrorMessage(error)}`
+        );
+      }
     }
   };
 
@@ -111,6 +262,41 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('remoteCopilot.showRelayOutput', () => {
       outputChannel.show(true);
     }),
+    vscode.commands.registerCommand(
+      'remoteCopilot.showRemoteSessions',
+      async () => {
+        try {
+          const entries = context.globalState.get<RemoteTranscriptEntry[]>(
+            TRANSCRIPT_STORAGE_KEY,
+            []
+          );
+          const document = await vscode.workspace.openTextDocument({
+            content: renderTranscriptMarkdown(entries),
+            language: 'markdown'
+          });
+
+          await vscode.window.showTextDocument(document, {
+            preview: false,
+            viewColumn: vscode.ViewColumn.Active
+          });
+        } catch (error) {
+          void vscode.window.showErrorMessage(toErrorMessage(error));
+        }
+      }
+    ),
+    vscode.commands.registerCommand(
+      'remoteCopilot.clearRemoteSessions',
+      async () => {
+        try {
+          await clearTranscripts(context);
+          void vscode.window.showInformationMessage(
+            'Remote Copilot transcripts cleared.'
+          );
+        } catch (error) {
+          void vscode.window.showErrorMessage(toErrorMessage(error));
+        }
+      }
+    ),
     vscode.commands.registerCommand(
       'remoteCopilot.reconnectRelay',
       async () => {
