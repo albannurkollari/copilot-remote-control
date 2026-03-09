@@ -1,6 +1,25 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+const workspacePackageAliases = {
+  '@remote-copilot/shared': fileURLToPath(
+    new URL('./packages/shared/src/index.ts', import.meta.url)
+  ),
+  '@remote-copilot/relay-server': fileURLToPath(
+    new URL('./packages/relay-server/src/index.ts', import.meta.url)
+  ),
+  '@remote-copilot/discord-bot': fileURLToPath(
+    new URL('./packages/discord-bot/src/index.ts', import.meta.url)
+  ),
+  '@remote-copilot/vscode-extension': fileURLToPath(
+    new URL('./packages/vscode-extension/src/index.ts', import.meta.url)
+  )
+};
+
 export default defineConfig({
+  resolve: {
+    alias: workspacePackageAliases
+  },
   test: {
     globals: true,
     environment: 'node',
