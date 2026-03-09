@@ -42,6 +42,7 @@
     "dev:bot": "pnpm --filter @remote-copilot/discord-bot dev",
     "dev:server": "pnpm --filter @remote-copilot/relay-server dev",
     "build": "pnpm -r run build",
+    "verify:copilot-rc-built": "pnpm --filter copilot-rc run smoke:built",
     "clean": "pnpm -r run clean",
     "test": "vitest run",
     "coverage": "pnpm vitest run --coverage",

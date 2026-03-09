@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "dev": "node --env-file=../../.env.dev src/server.ts",
+    "dev": "node --env-file=../../.env.dev src/main.ts",
     "build": "tsup",
     "clean": "rm -rfd dist",
     "typecheck": "tsc --project tsconfig.json --noEmit",
