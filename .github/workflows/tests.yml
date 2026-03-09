@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup environment
         uses: ./.github/actions/setup
@@ -19,10 +21,12 @@ jobs:
       - name: Run tests (with coverage)
         run: pnpm test
 
-      - name: Upload test results to Codecov
+      - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: codecov/codecov-action@v5
         with:
+          disable_search: true
           fail_ci_if_error: false
+          files: ./coverage/lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
