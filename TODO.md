@@ -27,7 +27,7 @@ For the exact local run flow, see [docs/local-development.md](docs/local-develop
 - [x] Remove `"private": true` from [packages/vscode-extension/package.json](packages/vscode-extension/package.json)
 - [x] Add VSIX packaging
 - [x] Replace the old placeholder shipping flow with [.github/workflows/publish.yml](.github/workflows/publish.yml)
-- [ ] Add Marketplace publish secrets or tokens
+- [x] Add Marketplace publish secrets or tokens
 
 ## Open product gaps
 
