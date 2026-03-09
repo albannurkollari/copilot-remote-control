@@ -21,7 +21,7 @@
     "directory": "packages/copilot-rc"
   },
   "bin": {
-    "copilot-rc": "./dist/index.js"
+    "copilot-rc": "dist/index.js"
   },
   "files": [
     "dist",
