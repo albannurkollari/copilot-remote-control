@@ -43,3 +43,47 @@ For the exact local run flow, see [docs/local-development.md](docs/local-develop
 2. Verify GitHub release automation
 3. Implement VS Code Marketplace packaging
 4. Improve remote approval and security
+
+---
+
+# Next Phase TODOs for copilot-remote-control
+
+## Priority Tasks
+
+1. **CLI User Onboarding & Prerequisites**
+   - Write clear instructions for users on creating a Discord bot project in the Developer Portal.
+   - Document required secrets (app id, server id, bot token) and how to provide them via CLI prompts.
+   - Add a "Prerequisites" section to the main README and CLI onboarding flow.
+
+2. **Install and Integrate CLI Prompt Library**
+   - Evaluate and install `commander` or a lighter alternative for CLI prompts.
+   - Implement interactive prompts for first-time setup (bot secrets, relay config).
+   - Implement an `init` command that does the above should the user need to reconfigure. The aforementioned step should call `init` on any available commands, if any of the required secrets are missing, but preserving the ones that exist thus not overriding them.
+
+3. **Concurrent Startup Command**
+   - Develop a single CLI command (e.g., `copilot-rc start`) that launches both relay-server and discord-bot concurrently.
+   - Ensure relay-server starts before bot attempts to connect.
+
+4. **VSCode Extension Error Notification**
+   - Add error handling in the extension to notify users if relay-server is not running or required extension settings are missing.
+   - Provide actionable error messages and setup guidance (if applicable).
+
+## Secondary Tasks
+
+1. **Semantic Release & Automated Publishing**
+   - Improve semantic release config to automate version bumps and npm publishing for relay-server and discord-bot. Or if the simplest approach is to bump all packages, but exclude publishing VSCode to NPM.
+   - Create a publishing script that triggers VSCode extension marketplace publish after npm publish completes for relay-server and discord-bot and then create a complementing workflow file that includes executing this script as step in its own.
+   - Create `publish.yml` workflow that has 2 jobs, one that does NPM publishing and the other vscode extension, which has dependency on the success of the first.
+
+2. **Monorepo Bin Packaging**
+   - Publish relay-server and discord-bot as a single bin under `copilot-rc` npm package.
+   - Exclude VSCode extension from npm package; publish it separately to the marketplace.
+
+---
+
+### Implementation Notes
+
+- Prioritize user onboarding, CLI prompts, concurrent startup, and extension error handling.
+- Use commander or a suitable alternative for CLI UX.
+- Ensure robust error handling and clear instructions for all user-facing flows.
+- Automate publishing workflows for seamless releases.
