@@ -24,6 +24,6 @@ jobs:
         continue-on-error: true
         uses: codecov/codecov-action@v5
         with:
-          fail_ci_if_error: true
-          files: ./coverage/junit.xml
+          fail_ci_if_error: false
+          files: ./coverage/lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}

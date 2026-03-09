@@ -32,12 +32,13 @@
   },
   "dependencies": {
     "@remote-copilot/shared": "workspace:*",
-    "@types/vscode": "^1.109.0",
-    "@vscode/test-electron": "^2.5.2",
+
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/vscode": "^1.109.0",
+    "@types/ws": "^8.18.1",
+    "@vscode/test-electron": "^2.5.2"
   },
   "contributes": {
     "commands": [
