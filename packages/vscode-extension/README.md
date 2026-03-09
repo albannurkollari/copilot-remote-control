@@ -37,6 +37,10 @@ If you want the full setup, start with `copilot-rc`, then connect this extension
 
 Use this command to grant the extension access to GitHub Copilot for remote prompt execution.
 
+### Remote Copilot: Copy Shared Secret
+
+Generates the extension-owned shared secret if needed, saves it to settings, and copies it to the clipboard so you can paste it into `copilot-rc init`.
+
 ### Remote Copilot: Show Relay Output
 
 Opens the output channel so you can inspect relay connection status, warnings, and runtime activity.
@@ -65,7 +69,7 @@ This extension contributes the following settings:
 
 - `remoteCopilot.clientId`: Logical client ID used to register this host with the relay server.
 - `remoteCopilot.relayUrl`: WebSocket relay URL used by this host.
-- `remoteCopilot.sharedSecret`: Shared secret that must match the relay server and remote client configuration.
+- `remoteCopilot.sharedSecret`: Shared secret owned by this extension and pasted into `copilot-rc init`.
 
 ## What the extension stores
 

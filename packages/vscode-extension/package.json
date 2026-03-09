@@ -66,6 +66,10 @@
         "title": "Remote Copilot: Authorize Copilot Access"
       },
       {
+        "command": "remoteCopilot.copySharedSecret",
+        "title": "Remote Copilot: Copy Shared Secret"
+      },
+      {
         "command": "remoteCopilot.showRelayOutput",
         "title": "Remote Copilot: Show Relay Output"
       },
@@ -94,6 +98,11 @@
           "type": "string",
           "default": "ws://127.0.0.1:8787/",
           "description": "WebSocket relay URL used by the remote Copilot host."
+        },
+        "remoteCopilot.sharedSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Shared secret owned by this VS Code extension. Use 'Remote Copilot: Copy Shared Secret' to generate or copy it for copilot-rc init."
         }
       }
     }

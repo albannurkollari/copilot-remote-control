@@ -1,7 +1,8 @@
 import {
-  type CopilotPromptMessage,
-  type PermissionRequestMessage
+    type CopilotPromptMessage,
+    type PermissionRequestMessage
 } from '@remote-copilot/shared';
+import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 
 import { CopilotBridge } from './copilotBridge.ts';
@@ -43,6 +44,47 @@ interface RemoteTranscriptEntry {
 
 const TRANSCRIPT_STORAGE_KEY = 'remoteCopilot.transcripts';
 const MAX_TRANSCRIPTS = 50;
+
+const createSharedSecret = () => {
+  return randomUUID();
+};
+
+const getSharedSecretTarget = () => {
+  const configuration = vscode.workspace.getConfiguration('remoteCopilot');
+  const inspection = configuration.inspect<string>('sharedSecret');
+
+  if (
+    inspection?.workspaceFolderValue !== undefined ||
+    inspection?.workspaceValue !== undefined
+  ) {
+    return vscode.ConfigurationTarget.Workspace;
+  }
+
+  return vscode.ConfigurationTarget.Global;
+};
+
+const ensureSharedSecret = async (options?: { copyToClipboard?: boolean }) => {
+  const configuration = vscode.workspace.getConfiguration('remoteCopilot');
+  const currentValue = configuration.get<string>('sharedSecret', '').trim();
+  const sharedSecret = currentValue.length > 0 ? currentValue : createSharedSecret();
+
+  if (currentValue.length === 0) {
+    await configuration.update(
+      'sharedSecret',
+      sharedSecret,
+      getSharedSecretTarget()
+    );
+  }
+
+  if (options?.copyToClipboard) {
+    await vscode.env.clipboard.writeText(sharedSecret);
+  }
+
+  return {
+    generated: currentValue.length === 0,
+    sharedSecret
+  };
+};
 
 const loadConfiguration = (): RemoteCopilotConfiguration => {
   const configuration = vscode.workspace.getConfiguration('remoteCopilot');
@@ -192,6 +234,7 @@ const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
 
 export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Remote Copilot');
+  const secretState = await ensureSharedSecret({ copyToClipboard: true });
   const configuration = loadConfiguration();
   const configurationIssues = validateConfiguration(configuration);
   const bridge = new CopilotBridge(context, outputChannel);
@@ -356,6 +399,36 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }
     ),
+    vscode.commands.registerCommand(
+      'remoteCopilot.copySharedSecret',
+      async () => {
+        try {
+          const { generated, sharedSecret } = await ensureSharedSecret({
+            copyToClipboard: true
+          });
+
+          outputChannel.appendLine(
+            `[config] Shared secret ${generated ? 'generated' : 'copied'} (${sharedSecret.length} chars).`
+          );
+
+          const action = await vscode.window.showInformationMessage(
+            generated
+              ? 'Remote Copilot shared secret generated, saved to settings, and copied to the clipboard. Paste it into copilot-rc init.'
+              : 'Remote Copilot shared secret copied to the clipboard. Paste it into copilot-rc init.',
+            'Open Settings'
+          );
+
+          if (action === 'Open Settings') {
+            await vscode.commands.executeCommand(
+              'workbench.action.openSettings',
+              'remoteCopilot.sharedSecret'
+            );
+          }
+        } catch (error) {
+          void vscode.window.showErrorMessage(toErrorMessage(error));
+        }
+      }
+    ),
     vscode.commands.registerCommand('remoteCopilot.showRelayOutput', () => {
       outputChannel.show(true);
     }),
@@ -414,6 +487,15 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine(`[relay:warning] ${message}`);
     void showRelayHelp(message);
     return;
+  }
+
+  if (secretState.generated) {
+    outputChannel.appendLine(
+      '[config] Generated a new Remote Copilot shared secret and copied it to the clipboard for copilot-rc init.'
+    );
+    void vscode.window.showInformationMessage(
+      'Remote Copilot generated a shared secret, saved it to settings, and copied it to the clipboard. Paste it into copilot-rc init.'
+    );
   }
 
   void relayClient.connect().catch((error) => {
