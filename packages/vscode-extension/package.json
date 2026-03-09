@@ -1,7 +1,7 @@
 {
   "name": "remote-copilot-host",
   "displayName": "Remote Copilot Host",
-  "version": "1.0.0",
+  "version": "1.1.5",
   "description": "Control GitHub Copilot remotely through a WebSocket relay host.",
   "categories": [
     "Other"
