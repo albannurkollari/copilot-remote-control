@@ -1,5 +1,7 @@
 import { defineConfig } from 'tsup';
 
+const isCI = process.env.CI === 'true';
+
 export default defineConfig({
   clean: true,
   dts: true,
@@ -11,6 +13,6 @@ export default defineConfig({
     js: '.cjs'
   }),
   splitting: false,
-  sourcemap: true,
+  sourcemap: !isCI,
   target: 'node24'
 });
