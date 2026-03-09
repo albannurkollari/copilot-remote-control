@@ -28,7 +28,7 @@
   "dependencies": {
     "@remote-copilot/shared": "workspace:*",
     "picocolors": "^1.1.1",
-    "ws": "^8.18.3"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"

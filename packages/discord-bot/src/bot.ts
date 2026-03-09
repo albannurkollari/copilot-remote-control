@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url';
+import { type PermissionRequestMessage } from '@remote-copilot/shared';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -9,14 +11,11 @@ import {
   ModalBuilder,
   REST,
   Routes,
-  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Message,
   TextInputBuilder,
-  TextInputStyle,
-  type ModalSubmitInteraction
+  TextInputStyle
 } from 'discord.js';
-import { pathToFileURL } from 'node:url';
 import pc from 'picocolors';
 import {
   buildCopilotPromptMessage,
@@ -28,7 +27,6 @@ import {
   RelayDiscordClient,
   type RelayDiscordClientOptions
 } from './relayClient.ts';
-import { type PermissionRequestMessage } from '@remote-copilot/shared';
 
 export interface DiscordBotConfig extends RelayDiscordClientOptions {
   approvalPassphrase?: string;
@@ -468,7 +466,9 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
           .setCustomId(
             createApprovalCustomId(request.permissionId, 'approve_ttl')
           )
-          .setLabel(`Approve ${formatDuration(config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)}`)
+          .setLabel(
+            `Approve ${formatDuration(config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)}`
+          )
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId(createApprovalCustomId(request.permissionId, 'deny'))
@@ -530,7 +530,8 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
 
       if (interaction.user.id !== pending.requesterId) {
         await interaction.reply({
-          content: 'Only the original requester can approve or deny this action.',
+          content:
+            'Only the original requester can approve or deny this action.',
           flags: MessageFlags.Ephemeral
         });
         return;
@@ -620,7 +621,10 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
         APPROVAL_PASSPHRASE_INPUT_ID
       );
 
-      if (!config.approvalPassphrase || submittedPassphrase !== config.approvalPassphrase) {
+      if (
+        !config.approvalPassphrase ||
+        submittedPassphrase !== config.approvalPassphrase
+      ) {
         await interaction.reply({
           content: 'Invalid passphrase.',
           flags: MessageFlags.Ephemeral
@@ -642,7 +646,8 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
         components: []
       });
       await interaction.reply({
-        content: 'Session authorization granted. Matching requests will now auto-approve for this bot session.',
+        content:
+          'Session authorization granted. Matching requests will now auto-approve for this bot session.',
         flags: MessageFlags.Ephemeral
       });
 
@@ -665,29 +670,25 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
       relayClient,
       config,
       requestPermissionApproval
-    ).catch(
-      async (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`Discord interaction failed: ${message}\n`);
+    ).catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Discord interaction failed: ${message}\n`);
 
-        if (interaction.deferred || interaction.replied) {
-          try {
-            await interaction.editReply(`Error: ${message}`);
-          } catch {
-          }
-          return;
-        }
-
-        if (isDiscordApiError(error, 10062)) {
-          return;
-        }
-
+      if (interaction.deferred || interaction.replied) {
         try {
-          await interaction.reply({ content: `Error: ${message}`, flags: 64 });
-        } catch {
-        }
+          await interaction.editReply(`Error: ${message}`);
+        } catch {}
+        return;
       }
-    );
+
+      if (isDiscordApiError(error, 10062)) {
+        return;
+      }
+
+      try {
+        await interaction.reply({ content: `Error: ${message}`, flags: 64 });
+      } catch {}
+    });
   });
 
   return {

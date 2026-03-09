@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import pc from 'picocolors';
 import {
   createPongMessage,
   parseRelayMessage,
@@ -16,6 +15,7 @@ import {
   type RelayStatusCode,
   type RelayStatusLevel
 } from '@remote-copilot/shared';
+import pc from 'picocolors';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
 export interface RelayServerOptions {
@@ -82,7 +82,9 @@ export class RelayServer {
     const mode = pc.yellow(`[${message.mode}]`);
     const author = pc.dim(message.userDisplayName ?? 'unknown');
 
-    this.#log(`${source} ${arrow} ${target} ${mode} ${author}: ${message.prompt}`);
+    this.#log(
+      `${source} ${arrow} ${target} ${mode} ${author}: ${message.prompt}`
+    );
   }
 
   #logCopilotReply(message: CopilotStreamMessage, content = 'Replies') {
@@ -358,7 +360,11 @@ export class RelayServer {
 
     this.#send(request.discordSocket, message);
 
-    if (this.verbose && !request.hasLoggedReply && (message.done || message.error)) {
+    if (
+      this.verbose &&
+      !request.hasLoggedReply &&
+      (message.done || message.error)
+    ) {
       request.hasLoggedReply = true;
       const content = message.error
         ? `Error: ${message.error}`

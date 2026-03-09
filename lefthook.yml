@@ -2,9 +2,12 @@ pre-push:
   commands:
     typecheck:
       run: pnpm typecheck
+      priority: 1
     lint:
       run: pnpm lint
+      priority: 2
     format:
+      priority: 3
       run: |
         pnpm fmt
         git diff --quiet

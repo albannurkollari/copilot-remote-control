@@ -3,7 +3,21 @@ import {
   type PermissionAction,
   type PermissionRequestMessage
 } from '@remote-copilot/shared';
-import * as vscode from 'vscode';
+import {
+  CancellationTokenSource,
+  LanguageModelChatMessage,
+  LanguageModelError,
+  LanguageModelTextPart,
+  LanguageModelToolCallPart,
+  LanguageModelToolResultPart,
+  lm,
+  type CancellationToken,
+  type ExtensionContext,
+  type LanguageModelChat,
+  type LanguageModelChatResponse,
+  type LanguageModelChatTool,
+  type OutputChannel
+} from 'vscode';
 
 export interface PermissionRequester {
   (
@@ -16,7 +30,7 @@ export interface RunPromptHandlers {
   requestPermission: PermissionRequester;
 }
 
-const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
+const REMOTE_TOOLS: LanguageModelChatTool[] = [
   {
     name: 'run_terminal_command',
     description:
@@ -71,13 +85,10 @@ const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
 ];
 
 export class CopilotBridge {
-  #context: vscode.ExtensionContext;
-  #outputChannel: vscode.OutputChannel;
+  #context: ExtensionContext;
+  #outputChannel: OutputChannel;
 
-  constructor(
-    context: vscode.ExtensionContext,
-    outputChannel: vscode.OutputChannel
-  ) {
+  constructor(context: ExtensionContext, outputChannel: OutputChannel) {
     this.#context = context;
     this.#outputChannel = outputChannel;
   }
@@ -95,12 +106,12 @@ export class CopilotBridge {
       return 'Copilot access is already authorized for this extension.';
     }
 
-    const tokenSource = new vscode.CancellationTokenSource();
+    const tokenSource = new CancellationTokenSource();
 
     try {
       const response = await model.sendRequest(
         [
-          vscode.LanguageModelChatMessage.User(
+          LanguageModelChatMessage.User(
             'Reply with exactly the word "authorized".'
           )
         ],
@@ -133,9 +144,9 @@ export class CopilotBridge {
       );
     }
 
-    const tokenSource = new vscode.CancellationTokenSource();
+    const tokenSource = new CancellationTokenSource();
     const conversation = [
-      vscode.LanguageModelChatMessage.User(this.#renderPrompt(message))
+      LanguageModelChatMessage.User(this.#renderPrompt(message))
     ];
 
     try {
@@ -160,20 +171,20 @@ export class CopilotBridge {
   }
 
   async #streamResponse(
-    response: vscode.LanguageModelChatResponse,
-    model: vscode.LanguageModelChat,
-    conversation: vscode.LanguageModelChatMessage[],
+    response: LanguageModelChatResponse,
+    model: LanguageModelChat,
+    conversation: LanguageModelChatMessage[],
     prompt: CopilotPromptMessage,
     handlers: RunPromptHandlers,
-    token: vscode.CancellationToken
+    token: CancellationToken
   ) {
     for await (const part of response.stream) {
-      if (part instanceof vscode.LanguageModelTextPart) {
+      if (part instanceof LanguageModelTextPart) {
         await handlers.onText(part.value);
         continue;
       }
 
-      if (part instanceof vscode.LanguageModelToolCallPart) {
+      if (part instanceof LanguageModelToolCallPart) {
         this.#outputChannel.appendLine(
           `[copilot] Tool request ${part.name} for ${prompt.requestId}.`
         );
@@ -186,11 +197,11 @@ export class CopilotBridge {
           );
         }
 
-        conversation.push(vscode.LanguageModelChatMessage.Assistant([part]));
+        conversation.push(LanguageModelChatMessage.Assistant([part]));
         conversation.push(
-          vscode.LanguageModelChatMessage.User([
-            new vscode.LanguageModelToolResultPart(part.callId, [
-              new vscode.LanguageModelTextPart(
+          LanguageModelChatMessage.User([
+            new LanguageModelToolResultPart(part.callId, [
+              new LanguageModelTextPart(
                 'Approved by the remote operator. Continue by describing the intended action and any manual steps instead of executing side effects automatically.'
               )
             ])
@@ -216,7 +227,7 @@ export class CopilotBridge {
   }
 
   async #selectModel() {
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    const models = await lm.selectChatModels({ vendor: 'copilot' });
 
     if (models.length === 0) {
       throw new Error(
@@ -251,7 +262,7 @@ export class CopilotBridge {
 
   #toPermissionRequest(
     prompt: CopilotPromptMessage,
-    part: vscode.LanguageModelToolCallPart
+    part: LanguageModelToolCallPart
   ): PermissionRequestMessage {
     const { action, command, details, title } = this.#describeToolCall(
       part.name,
@@ -314,7 +325,7 @@ export class CopilotBridge {
   }
 
   #toUserFacingError(error: unknown) {
-    if (error instanceof vscode.LanguageModelError) {
+    if (error instanceof LanguageModelError) {
       return error.message;
     }
 

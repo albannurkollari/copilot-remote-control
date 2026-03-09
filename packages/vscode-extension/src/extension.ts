@@ -78,9 +78,11 @@ const clearTranscripts = async (context: vscode.ExtensionContext) => {
 
 const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
   if (entries.length === 0) {
-    return ['# Remote Copilot Sessions', '', 'No saved remote sessions yet.'].join(
-      '\n'
-    );
+    return [
+      '# Remote Copilot Sessions',
+      '',
+      'No saved remote sessions yet.'
+    ].join('\n');
   }
 
   return [
@@ -179,7 +181,8 @@ export async function activate(context: vscode.ExtensionContext) {
             `[prompt:${message.requestId}] Awaiting permission for ${permissionRequest.action}.`
           );
           const requestedAt = new Date().toISOString();
-          const approval = await relayClient.requestPermission(permissionRequest);
+          const approval =
+            await relayClient.requestPermission(permissionRequest);
 
           permissions.push({
             action: permissionRequest.action,
@@ -228,9 +231,7 @@ export async function activate(context: vscode.ExtensionContext) {
           userDisplayName: message.userDisplayName
         });
       } catch (error) {
-        outputChannel.appendLine(
-          `[transcript:error] ${toErrorMessage(error)}`
-        );
+        outputChannel.appendLine(`[transcript:error] ${toErrorMessage(error)}`);
       }
     }
   };
