@@ -1,3 +1,3 @@
-export * from './bot.js';
-export * from './relayClient.js';
-export * from './commands/copilot.js';
+export * from './bot.ts';
+export * from './commands/copilot.ts';
+export * from './relayClient.ts';

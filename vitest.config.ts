@@ -11,7 +11,7 @@ const workspacePackageAliases = {
   '@remote-copilot/discord-bot': fileURLToPath(
     new URL('./packages/discord-bot/src/index.ts', import.meta.url)
   ),
-  '@remote-copilot/vscode-extension': fileURLToPath(
+  'remote-copilot-host': fileURLToPath(
     new URL('./packages/vscode-extension/src/index.ts', import.meta.url)
   )
 };
@@ -49,7 +49,7 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          name: '@remote-copilot/vscode-extension',
+          name: 'remote-copilot-host',
           root: 'packages/vscode-extension'
         }
       }

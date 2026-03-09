@@ -1,23 +1,9 @@
 import {
-  type CopilotPromptMessage,
-  type PermissionAction,
-  type PermissionRequestMessage
+    type CopilotPromptMessage,
+    type PermissionAction,
+    type PermissionRequestMessage
 } from '@remote-copilot/shared';
-import {
-  CancellationTokenSource,
-  LanguageModelChatMessage,
-  LanguageModelError,
-  LanguageModelTextPart,
-  LanguageModelToolCallPart,
-  LanguageModelToolResultPart,
-  lm,
-  type CancellationToken,
-  type ExtensionContext,
-  type LanguageModelChat,
-  type LanguageModelChatResponse,
-  type LanguageModelChatTool,
-  type OutputChannel
-} from 'vscode';
+import * as vscode from 'vscode';
 
 export interface PermissionRequester {
   (
@@ -30,7 +16,7 @@ export interface RunPromptHandlers {
   requestPermission: PermissionRequester;
 }
 
-const REMOTE_TOOLS: LanguageModelChatTool[] = [
+const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
   {
     name: 'run_terminal_command',
     description:
@@ -85,15 +71,19 @@ const REMOTE_TOOLS: LanguageModelChatTool[] = [
 ];
 
 export class CopilotBridge {
-  #context: ExtensionContext;
-  #outputChannel: OutputChannel;
+  #context: vscode.ExtensionContext;
+  #outputChannel: vscode.OutputChannel;
 
-  constructor(context: ExtensionContext, outputChannel: OutputChannel) {
+  constructor(
+    context: vscode.ExtensionContext,
+    outputChannel: vscode.OutputChannel
+  ) {
     this.#context = context;
     this.#outputChannel = outputChannel;
   }
 
   async authorizeAccess() {
+    const api = this.#getLanguageModelApi();
     const model = await this.#selectModel();
     this.#outputChannel.appendLine(
       `[copilot] Authorizing access with model ${model.id ?? 'unknown'}.`
@@ -106,12 +96,12 @@ export class CopilotBridge {
       return 'Copilot access is already authorized for this extension.';
     }
 
-    const tokenSource = new CancellationTokenSource();
+    const tokenSource = new api.CancellationTokenSource();
 
     try {
       const response = await model.sendRequest(
         [
-          LanguageModelChatMessage.User(
+          api.LanguageModelChatMessage.User(
             'Reply with exactly the word "authorized".'
           )
         ],
@@ -131,6 +121,7 @@ export class CopilotBridge {
   }
 
   async runPrompt(message: CopilotPromptMessage, handlers: RunPromptHandlers) {
+    const api = this.#getLanguageModelApi();
     const model = await this.#selectModel();
     const canSend =
       this.#context.languageModelAccessInformation.canSendRequest(model);
@@ -144,9 +135,9 @@ export class CopilotBridge {
       );
     }
 
-    const tokenSource = new CancellationTokenSource();
+    const tokenSource = new api.CancellationTokenSource();
     const conversation = [
-      LanguageModelChatMessage.User(this.#renderPrompt(message))
+      api.LanguageModelChatMessage.User(this.#renderPrompt(message))
     ];
 
     try {
@@ -171,20 +162,22 @@ export class CopilotBridge {
   }
 
   async #streamResponse(
-    response: LanguageModelChatResponse,
-    model: LanguageModelChat,
-    conversation: LanguageModelChatMessage[],
+    response: vscode.LanguageModelChatResponse,
+    model: vscode.LanguageModelChat,
+    conversation: vscode.LanguageModelChatMessage[],
     prompt: CopilotPromptMessage,
     handlers: RunPromptHandlers,
-    token: CancellationToken
+    token: vscode.CancellationToken
   ) {
+    const api = this.#getLanguageModelApi();
+
     for await (const part of response.stream) {
-      if (part instanceof LanguageModelTextPart) {
+      if (part instanceof api.LanguageModelTextPart) {
         await handlers.onText(part.value);
         continue;
       }
 
-      if (part instanceof LanguageModelToolCallPart) {
+      if (part instanceof api.LanguageModelToolCallPart) {
         this.#outputChannel.appendLine(
           `[copilot] Tool request ${part.name} for ${prompt.requestId}.`
         );
@@ -197,11 +190,11 @@ export class CopilotBridge {
           );
         }
 
-        conversation.push(LanguageModelChatMessage.Assistant([part]));
+        conversation.push(api.LanguageModelChatMessage.Assistant([part]));
         conversation.push(
-          LanguageModelChatMessage.User([
-            new LanguageModelToolResultPart(part.callId, [
-              new LanguageModelTextPart(
+          api.LanguageModelChatMessage.User([
+            new api.LanguageModelToolResultPart(part.callId, [
+              new api.LanguageModelTextPart(
                 'Approved by the remote operator. Continue by describing the intended action and any manual steps instead of executing side effects automatically.'
               )
             ])
@@ -227,6 +220,7 @@ export class CopilotBridge {
   }
 
   async #selectModel() {
+    const { lm } = this.#getLanguageModelApi();
     const models = await lm.selectChatModels({ vendor: 'copilot' });
 
     if (models.length === 0) {
@@ -262,7 +256,7 @@ export class CopilotBridge {
 
   #toPermissionRequest(
     prompt: CopilotPromptMessage,
-    part: LanguageModelToolCallPart
+    part: vscode.LanguageModelToolCallPart
   ): PermissionRequestMessage {
     const { action, command, details, title } = this.#describeToolCall(
       part.name,
@@ -324,8 +318,54 @@ export class CopilotBridge {
     };
   }
 
+  #getLanguageModelApi() {
+    const api = vscode as typeof vscode & {
+      lm?: typeof vscode.lm;
+      LanguageModelChatMessage?: typeof vscode.LanguageModelChatMessage;
+      LanguageModelError?: typeof vscode.LanguageModelError;
+      LanguageModelTextPart?: typeof vscode.LanguageModelTextPart;
+      LanguageModelToolCallPart?: typeof vscode.LanguageModelToolCallPart;
+      LanguageModelToolResultPart?: typeof vscode.LanguageModelToolResultPart;
+    };
+
+    if (!this.#context.languageModelAccessInformation) {
+      throw new Error(
+        'This VS Code build does not expose the GitHub Copilot language model API required by Remote Copilot Host.'
+      );
+    }
+
+    if (
+      !api.lm ||
+      !api.LanguageModelChatMessage ||
+      !api.LanguageModelError ||
+      !api.LanguageModelTextPart ||
+      !api.LanguageModelToolCallPart ||
+      !api.LanguageModelToolResultPart
+    ) {
+      throw new Error(
+        'This VS Code build does not support the GitHub Copilot chat APIs required by Remote Copilot Host. Use a compatible VS Code version with GitHub Copilot Chat available.'
+      );
+    }
+
+    return {
+      CancellationTokenSource: vscode.CancellationTokenSource,
+      LanguageModelChatMessage: api.LanguageModelChatMessage,
+      LanguageModelError: api.LanguageModelError,
+      LanguageModelTextPart: api.LanguageModelTextPart,
+      LanguageModelToolCallPart: api.LanguageModelToolCallPart,
+      LanguageModelToolResultPart: api.LanguageModelToolResultPart,
+      lm: api.lm
+    };
+  }
+
   #toUserFacingError(error: unknown) {
-    if (error instanceof LanguageModelError) {
+    const languageModelError = (
+      vscode as typeof vscode & {
+        LanguageModelError?: typeof vscode.LanguageModelError;
+      }
+    ).LanguageModelError;
+
+    if (languageModelError && error instanceof languageModelError) {
       return error.message;
     }
 

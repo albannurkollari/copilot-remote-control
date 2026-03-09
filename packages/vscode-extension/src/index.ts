@@ -1,3 +1,3 @@
-export * from './extension.js';
-export * from './relayClient.js';
-export * from './copilotBridge.js';
+export * from './copilotBridge.ts';
+export * from './extension.ts';
+export * from './relayClient.ts';
