@@ -27,9 +27,9 @@
   },
   "dependencies": {
     "@remote-copilot/shared": "workspace:*",
-    "discord.js": "^14.24.2",
+    "discord.js": "^14.25.1",
     "picocolors": "^1.1.1",
-    "ws": "^8.18.3"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"
