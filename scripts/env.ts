@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-
-import { randomBytes } from 'node:crypto';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -23,7 +21,8 @@ const PLACEHOLDER_PREFIXES = ['replace-with-', '{{'];
 export const REMOTE_COPILOT_REQUIRED_KEYS = [
   'DISCORD_APPLICATION_ID',
   'DISCORD_GUILD_ID',
-  'DISCORD_TOKEN'
+  'DISCORD_TOKEN',
+  'REMOTE_COPILOT_SHARED_SECRET'
 ] as const;
 
 export const ENV_PRESETS: Record<EnvMode, EnvValues> = {
@@ -149,10 +148,6 @@ export const buildRelayUrl = (values: EnvValues) => {
   return `${protocol}://${host}:${port}${relayPath}`;
 };
 
-export const generateSharedSecret = () => {
-  return randomBytes(24).toString('hex');
-};
-
 export const mergeRemoteCopilotEnvValues = (
   mode: EnvMode,
   values: Partial<EnvValues> = {}
@@ -179,11 +174,8 @@ export const mergeRemoteCopilotEnvValues = (
     ...merged,
     RELAY_URL: normalizedValues.RELAY_URL || ''
   });
-  merged.REMOTE_COPILOT_SHARED_SECRET = isMeaningfulValue(
-    merged.REMOTE_COPILOT_SHARED_SECRET
-  )
-    ? merged.REMOTE_COPILOT_SHARED_SECRET
-    : generateSharedSecret();
+  merged.REMOTE_COPILOT_SHARED_SECRET =
+    merged.REMOTE_COPILOT_SHARED_SECRET || '';
   merged.VSCODE_REMOTE_COPILOT_CLIENT_ID = merged.REMOTE_COPILOT_CLIENT_ID;
   merged.VSCODE_REMOTE_COPILOT_RELAY_URL = merged.RELAY_URL;
   merged.VSCODE_REMOTE_COPILOT_SHARED_SECRET =

@@ -8,3 +8,5 @@ It provides one installable binary:
 - `copilot-rc start` to start the relay server and Discord bot together
 
 The VS Code extension is intentionally published separately through the VS Code Marketplace.
+
+Before running `copilot-rc init`, generate or copy the shared secret from the VS Code extension with `Remote Copilot: Copy Shared Secret`, then paste that value into the init prompt.

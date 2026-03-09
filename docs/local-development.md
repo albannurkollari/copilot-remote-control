@@ -15,9 +15,9 @@ This guide covers running the project locally end to end.
 From the repository root:
 
 1. Run `pnpm install`
-2. Run `pnpm dev:init`
-3. Provide your Discord application ID, Discord server ID, and bot token when prompted
-4. Copy the printed VS Code settings, including the shared secret, into your local `settings.json`
+2. In VS Code, run `Remote Copilot: Copy Shared Secret` once to generate and copy the extension-owned shared secret
+3. Run `pnpm dev:init`
+4. Provide your Discord application ID, Discord server ID, bot token, and paste the shared secret from the extension when prompted
 
 ## 2. Start the relay server and Discord bot
 
@@ -39,8 +39,7 @@ Default address:
 ```json
 {
   "remoteCopilot.clientId": "default",
-  "remoteCopilot.relayUrl": "ws://127.0.0.1:8787/",
-  "remoteCopilot.sharedSecret": "paste-the-generated-secret"
+  "remoteCopilot.relayUrl": "ws://127.0.0.1:8787/"
 }
 ```
 
@@ -68,7 +67,8 @@ The extension does not read env files directly. Copy these values into VS Code s
 
 - `remoteCopilot.clientId`
 - `remoteCopilot.relayUrl`
-- `remoteCopilot.sharedSecret`
+
+The extension owns `remoteCopilot.sharedSecret`. Generate or copy it with `Remote Copilot: Copy Shared Secret`, then paste that value into `copilot-rc init`.
 
 The extension stores the latest remote transcripts in extension global state and shows them through `Remote Copilot: Show Remote Sessions`.
 That state is persisted by VS Code outside the workspace folder, so it survives window reloads and restarts until you clear it.
