@@ -38,7 +38,6 @@
     "dev": "pnpm -r --parallel run dev",
     "dev:bot": "pnpm --filter @remote-copilot/discord-bot dev",
     "dev:server": "pnpm --filter @remote-copilot/relay-server dev",
-    "dev:extension": "pnpm --filter @remote-copilot/vscode-extension dev",
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "test": "vitest run",
@@ -97,29 +96,13 @@
           ]
         }
       ],
-      "@semantic-release/release-notes-generator",
-      [
-        "@semantic-release/exec",
-        {
-          "verifyConditionsCmd": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm test && pnpm build"
-        }
-      ],
       [
         "@semantic-release/npm",
         {
           "npmPublish": false
         }
       ],
-      [
-        "@semantic-release/git",
-        {
-          "assets": [
-            "package.json",
-            "pnpm-lock.yaml"
-          ],
-          "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
-        }
-      ],
+      "@semantic-release/release-notes-generator",
       "@semantic-release/github"
     ]
   },
