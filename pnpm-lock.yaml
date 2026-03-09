@@ -109,19 +109,19 @@ importers:
       '@remote-copilot/shared':
         specifier: workspace:*
         version: link:../shared
-      '@types/vscode':
-        specifier: ^1.109.0
-        version: 1.109.0
-      '@vscode/test-electron':
-        specifier: ^2.5.2
-        version: 2.5.2
       ws:
         specifier: ^8.19.0
         version: 8.19.0
     devDependencies:
+      '@types/vscode':
+        specifier: ^1.109.0
+        version: 1.109.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      '@vscode/test-electron':
+        specifier: ^2.5.2
+        version: 2.5.2
 
 packages:
 
