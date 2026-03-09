@@ -176,4 +176,55 @@ describe('RelayServer', () => {
 
     discord.close();
   });
+
+  it('rejects client registration with an invalid shared secret', async () => {
+    const server = new RelayServer({
+      port: 8794,
+      sharedSecret: 'trusted-secret'
+    });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1',
+        sharedSecret: 'wrong-secret'
+      })
+    );
+
+    const status = await nextMessage(discord);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('authorization_required');
+    discord.close();
+  });
+
+  it('accepts client registration with the configured shared secret', async () => {
+    const server = new RelayServer({
+      port: 8795,
+      sharedSecret: 'trusted-secret'
+    });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1',
+        sharedSecret: 'trusted-secret'
+      })
+    );
+
+    const ack = await nextMessage(discord);
+    expect(ack.type).toBe('register_ack');
+    discord.close();
+  });
 });

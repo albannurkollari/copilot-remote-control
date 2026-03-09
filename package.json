@@ -35,7 +35,10 @@
   },
   "type": "module",
   "scripts": {
+    "postinstall": "pnpm dev:init",
     "dev": "pnpm -r --parallel run dev",
+    "dev:init": "pnpm --filter copilot-rc dev init",
+    "dev:stack": "pnpm --filter copilot-rc dev start",
     "dev:bot": "pnpm --filter @remote-copilot/discord-bot dev",
     "dev:server": "pnpm --filter @remote-copilot/relay-server dev",
     "build": "pnpm -r run build",
@@ -51,7 +54,8 @@
     "lint:fix": "oxlint --fix",
     "typecheck": "pnpm -r run typecheck",
     "release": "semantic-release",
-    "release:dry-run": "semantic-release --dry-run"
+    "release:dry-run": "semantic-release --dry-run",
+    "publish:extension": "pnpm --dir packages/vscode-extension run publish:marketplace"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -98,16 +102,21 @@
         }
       ],
       "@semantic-release/release-notes-generator",
+      [
+        "@semantic-release/npm",
+        {
+          "pkgRoot": "packages/copilot-rc"
+        }
+      ],
       "@semantic-release/github"
     ]
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "10"
-    }
-  },
   "engines": {
     "node": ">=24"
+  },
+  "pnpm": {
+    "overrides": {
+      "@vscode/vsce>minimatch": "3.1.2"
+    }
   }
 }

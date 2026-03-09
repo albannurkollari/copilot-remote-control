@@ -277,15 +277,23 @@ export const loadDiscordBotConfig = (): DiscordBotConfig => {
   const applicationId = process.env.DISCORD_APPLICATION_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
   const relayUrl = process.env.RELAY_URL;
+  const sharedSecret = process.env.REMOTE_COPILOT_SHARED_SECRET?.trim();
   const targetClientId = process.env.REMOTE_COPILOT_CLIENT_ID;
   const approvalTtlMs = Number.parseInt(
     process.env.DISCORD_APPROVAL_TTL_MS ?? `${DEFAULT_APPROVAL_TTL_MS}`,
     10
   );
 
-  if (!token || !applicationId || !guildId || !relayUrl || !targetClientId) {
+  if (
+    !token ||
+    !applicationId ||
+    !guildId ||
+    !relayUrl ||
+    !targetClientId ||
+    !sharedSecret
+  ) {
     throw new Error(
-      'Missing required Discord bot configuration. Expected DISCORD_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID, RELAY_URL, and REMOTE_COPILOT_CLIENT_ID.'
+      'Missing required Discord bot configuration. Expected DISCORD_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID, RELAY_URL, REMOTE_COPILOT_CLIENT_ID, and REMOTE_COPILOT_SHARED_SECRET.'
     );
   }
 
@@ -301,6 +309,7 @@ export const loadDiscordBotConfig = (): DiscordBotConfig => {
     clientId: 'discord-bot',
     guildId,
     relayUrl,
+    sharedSecret,
     targetClientId,
     token,
     updateIntervalMs: Number.parseInt(
@@ -403,7 +412,8 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
   const relayClient = new RelayDiscordClient({
     clientId: config.clientId,
     relayUrl: config.relayUrl,
-    reconnectDelayMs: config.reconnectDelayMs
+    reconnectDelayMs: config.reconnectDelayMs,
+    sharedSecret: config.sharedSecret
   });
 
   const getApprovalGrant = (cacheKey: string) => {

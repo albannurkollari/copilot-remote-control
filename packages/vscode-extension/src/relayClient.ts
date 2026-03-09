@@ -15,11 +15,13 @@ export interface VscodeRelayClientOptions {
   clientId: string;
   outputChannel: vscode.OutputChannel;
   reconnectDelayMs?: number;
+  sharedSecret: string;
   url: string;
 }
 
 type PromptListener = (message: CopilotPromptMessage) => void | Promise<void>;
 type StatusListener = (message: RelayStatusMessage) => void | Promise<void>;
+type ConnectionProblemListener = (message: string) => void | Promise<void>;
 
 interface PendingPermissionResponse {
   reject: (error: Error) => void;
@@ -30,9 +32,11 @@ const DEFAULT_READY_TIMEOUT_MS = 10_000;
 
 export class VscodeRelayClient implements vscode.Disposable {
   readonly clientId: string;
+  readonly sharedSecret: string;
   readonly url: string;
 
   #outputChannel: vscode.OutputChannel;
+  #connectionProblemListeners = new Set<ConnectionProblemListener>();
   #promptListeners = new Set<PromptListener>();
   #statusListeners = new Set<StatusListener>();
   #permissionResponses = new Map<string, PendingPermissionResponse>();
@@ -46,6 +50,7 @@ export class VscodeRelayClient implements vscode.Disposable {
 
   constructor(options: VscodeRelayClientOptions) {
     this.clientId = options.clientId;
+    this.sharedSecret = options.sharedSecret;
     this.url = options.url;
     this.#outputChannel = options.outputChannel;
     this.#reconnectDelayMs = options.reconnectDelayMs ?? 1_500;
@@ -80,7 +85,8 @@ export class VscodeRelayClient implements vscode.Disposable {
       this.#sendRaw({
         type: 'register',
         clientRole: 'vscode',
-        clientId: this.clientId
+        clientId: this.clientId,
+        sharedSecret: this.sharedSecret
       });
     });
 
@@ -93,7 +99,9 @@ export class VscodeRelayClient implements vscode.Disposable {
     });
 
     socket.on('error', (error) => {
-      this.#log(`Relay socket error: ${error.message}`);
+      const message = `Relay socket error: ${error.message}`;
+      this.#log(message);
+      void this.#emitConnectionProblem(message);
       this.#handleDisconnect();
     });
 
@@ -135,6 +143,13 @@ export class VscodeRelayClient implements vscode.Disposable {
     this.#statusListeners.add(listener);
     return () => {
       this.#statusListeners.delete(listener);
+    };
+  }
+
+  onConnectionProblem(listener: ConnectionProblemListener) {
+    this.#connectionProblemListeners.add(listener);
+    return () => {
+      this.#connectionProblemListeners.delete(listener);
     };
   }
 
@@ -199,7 +214,12 @@ export class VscodeRelayClient implements vscode.Disposable {
     message:
       | CopilotStreamMessage
       | PermissionRequestMessage
-      | { type: 'register'; clientRole: 'vscode'; clientId: string }
+      | {
+          type: 'register';
+          clientRole: 'vscode';
+          clientId: string;
+          sharedSecret: string;
+        }
   ) {
     if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
       throw new Error('Relay connection is not open.');
@@ -252,7 +272,14 @@ export class VscodeRelayClient implements vscode.Disposable {
   }
 
   #handleDisconnect() {
+    const wasReady = this.#isReady;
     this.#isReady = false;
+
+    if (wasReady) {
+      void this.#emitConnectionProblem(
+        `Relay connection to ${this.url} was lost. Retrying automatically.`
+      );
+    }
 
     if (!this.#shouldReconnect || this.#reconnectTimer) {
       return;
@@ -275,5 +302,11 @@ export class VscodeRelayClient implements vscode.Disposable {
 
   #log(message: string) {
     this.#outputChannel.appendLine(`[relay] ${message}`);
+  }
+
+  async #emitConnectionProblem(message: string) {
+    for (const listener of this.#connectionProblemListeners) {
+      await listener(message);
+    }
   }
 }

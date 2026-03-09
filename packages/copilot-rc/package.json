@@ -1,0 +1,63 @@
+{
+  "name": "copilot-rc",
+  "version": "1.0.0",
+  "private": false,
+  "description": "CLI for initializing and running the Remote Copilot relay server and Discord bot.",
+  "keywords": [
+    "copilot",
+    "discord",
+    "relay",
+    "remote-control",
+    "vscode"
+  ],
+  "homepage": "https://github.com/albannurkollari/copilot-remote-control/tree/main/packages/copilot-rc",
+  "bugs": {
+    "url": "https://github.com/albannurkollari/copilot-remote-control/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/albannurkollari/copilot-remote-control.git",
+    "directory": "packages/copilot-rc"
+  },
+  "bin": {
+    "copilot-rc": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "node src/index.ts",
+    "build": "tsup",
+    "clean": "rm -rfd dist",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node --eval \"console.log('No tests yet for copilot-rc.')\""
+  },
+  "dependencies": {
+    "@remote-copilot/discord-bot": "workspace:*",
+    "@remote-copilot/relay-server": "workspace:*",
+    "commander": "^14.0.1",
+    "discord.js": "^14.25.1",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "ws": "^8.19.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

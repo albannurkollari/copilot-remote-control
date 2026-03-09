@@ -15,6 +15,7 @@ export interface RelayDiscordClientOptions {
   clientId: string;
   reconnectDelayMs?: number;
   relayUrl: string;
+  sharedSecret?: string;
 }
 
 export interface PromptRequestHandlers {
@@ -40,6 +41,7 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
   readonly clientId: string;
   readonly reconnectDelayMs: number;
   readonly relayUrl: string;
+  readonly sharedSecret?: string;
 
   #connectPromise?: Promise<void>;
   #isStopping = false;
@@ -53,6 +55,7 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
     this.clientId = options.clientId;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 2_000;
     this.relayUrl = options.relayUrl;
+    this.sharedSecret = options.sharedSecret;
   }
 
   get isConnected() {
@@ -104,7 +107,8 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
           serializeRelayMessage({
             type: 'register',
             clientId: this.clientId,
-            clientRole: 'discord'
+            clientRole: 'discord',
+            ...(this.sharedSecret ? { sharedSecret: this.sharedSecret } : {})
           })
         );
       });

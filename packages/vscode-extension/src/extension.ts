@@ -10,6 +10,11 @@ import { VscodeRelayClient } from './relayClient.ts';
 interface RemoteCopilotConfiguration {
   clientId: string;
   relayUrl: string;
+  sharedSecret: string;
+}
+
+interface RelayHelpAction {
+  title: 'Open Settings' | 'Show Output' | 'Reconnect';
 }
 
 interface RemotePermissionTranscriptEntry {
@@ -41,11 +46,35 @@ const MAX_TRANSCRIPTS = 50;
 
 const loadConfiguration = (): RemoteCopilotConfiguration => {
   const configuration = vscode.workspace.getConfiguration('remoteCopilot');
+  const clientId = configuration.get<string>('clientId', 'default').trim();
+  const relayUrl = configuration
+    .get<string>('relayUrl', 'ws://127.0.0.1:8787/')
+    .trim();
+  const sharedSecret = configuration.get<string>('sharedSecret', '').trim();
 
   return {
-    clientId: configuration.get<string>('clientId', 'default'),
-    relayUrl: configuration.get<string>('relayUrl', 'ws://127.0.0.1:8787/')
+    clientId,
+    relayUrl,
+    sharedSecret
   };
+};
+
+const validateConfiguration = (configuration: RemoteCopilotConfiguration) => {
+  const issues: string[] = [];
+
+  if (configuration.clientId.length === 0) {
+    issues.push('`remoteCopilot.clientId` is empty.');
+  }
+
+  if (configuration.relayUrl.length === 0) {
+    issues.push('`remoteCopilot.relayUrl` is empty.');
+  }
+
+  if (configuration.sharedSecret.length === 0) {
+    issues.push('`remoteCopilot.sharedSecret` is empty.');
+  }
+
+  return issues;
 };
 
 const toErrorMessage = (error: unknown) => {
@@ -164,12 +193,53 @@ const renderTranscriptMarkdown = (entries: RemoteTranscriptEntry[]) => {
 export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Remote Copilot');
   const configuration = loadConfiguration();
+  const configurationIssues = validateConfiguration(configuration);
   const bridge = new CopilotBridge(context, outputChannel);
   const relayClient = new VscodeRelayClient({
     clientId: configuration.clientId,
     outputChannel,
+    sharedSecret: configuration.sharedSecret,
     url: configuration.relayUrl
   });
+  let lastRelayWarning = '';
+
+  const showRelayHelp = async (message: string) => {
+    if (message === lastRelayWarning) {
+      return;
+    }
+
+    lastRelayWarning = message;
+    const action = await vscode.window.showWarningMessage<RelayHelpAction>(
+      `${message} Check your Remote Copilot settings and make sure the relay server is running.`,
+      { title: 'Open Settings' },
+      { title: 'Show Output' },
+      { title: 'Reconnect' }
+    );
+
+    switch (action?.title) {
+      case 'Open Settings':
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'remoteCopilot'
+        );
+        return;
+      case 'Show Output':
+        outputChannel.show(true);
+        return;
+      case 'Reconnect':
+        try {
+          await relayClient.reconnect();
+          void vscode.window.showInformationMessage(
+            'Remote Copilot relay reconnected.'
+          );
+        } catch (error) {
+          void vscode.window.showErrorMessage(toErrorMessage(error));
+        }
+        return;
+      default:
+        return;
+    }
+  };
 
   const handlePrompt = async (message: CopilotPromptMessage) => {
     const startedAt = new Date().toISOString();
@@ -263,11 +333,18 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine(`[relay:${message.level}] ${message.message}`);
   });
 
+  const disposeConnectionProblemListener = relayClient.onConnectionProblem(
+    (message) => {
+      void showRelayHelp(message);
+    }
+  );
+
   context.subscriptions.push(
     relayClient,
     outputChannel,
     { dispose: disposePromptListener },
     { dispose: disposeStatusListener },
+    { dispose: disposeConnectionProblemListener },
     vscode.commands.registerCommand(
       'remoteCopilot.authorizeCopilotAccess',
       async () => {
@@ -332,8 +409,17 @@ export async function activate(context: vscode.ExtensionContext) {
     )
   );
 
+  if (configurationIssues.length > 0) {
+    const message = configurationIssues.join(' ');
+    outputChannel.appendLine(`[relay:warning] ${message}`);
+    void showRelayHelp(message);
+    return;
+  }
+
   void relayClient.connect().catch((error) => {
-    outputChannel.appendLine(`[relay:error] ${toErrorMessage(error)}`);
+    const message = `Could not connect to ${configuration.relayUrl}. ${toErrorMessage(error)}`;
+    outputChannel.appendLine(`[relay:error] ${message}`);
+    void showRelayHelp(message);
   });
 }
 

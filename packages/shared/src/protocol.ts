@@ -38,6 +38,7 @@ export interface RegisterMessage {
   type: 'register';
   clientRole: ClientRole;
   clientId: string;
+  sharedSecret?: string;
 }
 
 export interface RegisterAckMessage {
@@ -218,11 +219,15 @@ export const parseRelayMessage = (value: unknown): ParseRelayMessageResult => {
     case 'register':
       if (
         !isClientRole(message.clientRole) ||
-        !isNonEmptyString(message.clientId)
+        !isNonEmptyString(message.clientId) ||
+        (hasOwn(message, 'sharedSecret') &&
+          message.sharedSecret !== undefined &&
+          !isNonEmptyString(message.sharedSecret))
       ) {
         return {
           ok: false,
-          error: 'Register messages require clientRole and clientId.'
+          error:
+            'Register messages require clientRole, clientId, and an optional non-empty sharedSecret.'
         };
       }
 
@@ -231,7 +236,10 @@ export const parseRelayMessage = (value: unknown): ParseRelayMessageResult => {
         value: {
           type: 'register',
           clientRole: message.clientRole,
-          clientId: message.clientId
+          clientId: message.clientId,
+          ...(isNonEmptyString(message.sharedSecret)
+            ? { sharedSecret: message.sharedSecret }
+            : {})
         }
       };
 
