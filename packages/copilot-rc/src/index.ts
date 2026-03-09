@@ -1,0 +1,288 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import path from 'node:path';
+import process from 'node:process';
+import { createInterface } from 'node:readline/promises';
+import { fileURLToPath } from 'node:url';
+import pc from 'picocolors';
+
+import {
+  type EnvMode,
+  type EnvValues,
+  applyEnvValuesToProcess,
+  buildRelayUrl,
+  fileExists,
+  formatVsCodeSettings,
+  hasMissingRequiredEnvValues,
+  isMeaningfulValue,
+  loadRemoteCopilotEnv,
+  mergeRemoteCopilotEnvValues,
+  normalizeRelayPath,
+  writeRemoteCopilotEnvFile
+} from '../../../scripts/env.ts';
+import { runRemoteControlStack } from './runtime.ts';
+
+type PromptField = {
+  defaultValue?: (values: EnvValues) => string;
+  description: string;
+  key: string;
+  optional?: boolean;
+  secret?: boolean;
+};
+
+interface EnsureEnvOptions {
+  force?: boolean;
+}
+
+interface EnsureEnvResult {
+  envPath: string;
+  values: EnvValues;
+}
+
+const CURRENT_DIR = fileURLToPath(new URL('.', import.meta.url));
+const REPO_ROOT = path.resolve(CURRENT_DIR, '../../..');
+const ANSI_YELLOW = '\x1b[33m';
+const ANSI_RESET = '\x1b[39m';
+
+const PROMPT_FIELDS: PromptField[] = [
+  {
+    key: 'DISCORD_APPLICATION_ID',
+    description: 'Discord application ID'
+  },
+  {
+    key: 'DISCORD_GUILD_ID',
+    description: 'Discord server ID where the bot is installed'
+  },
+  {
+    key: 'DISCORD_TOKEN',
+    description: 'Discord bot token',
+    secret: true
+  },
+  {
+    key: 'REMOTE_COPILOT_CLIENT_ID',
+    description: 'VS Code client ID used by the relay',
+    defaultValue: (values) => values.REMOTE_COPILOT_CLIENT_ID || 'default'
+  },
+  {
+    key: 'RELAY_HOST',
+    description: 'Relay host',
+    defaultValue: (values) => values.RELAY_HOST || '127.0.0.1'
+  },
+  {
+    key: 'RELAY_PORT',
+    description: 'Relay port',
+    defaultValue: (values) => values.RELAY_PORT || '8787'
+  },
+  {
+    key: 'RELAY_PATH',
+    description: 'Relay path',
+    defaultValue: (values) => values.RELAY_PATH || '/'
+  },
+  {
+    key: 'RELAY_URL',
+    description: 'Relay URL used by the Discord bot and VS Code extension',
+    defaultValue: (values) => buildRelayUrl(values)
+  },
+  {
+    key: 'DISCORD_APPROVAL_PASSPHRASE',
+    description: 'Optional passphrase for session approvals',
+    optional: true
+  }
+];
+
+const program = new Command();
+
+const resolveEnvPath = (mode: EnvMode) => {
+  return path.resolve(REPO_ROOT, `.env.${mode}`);
+};
+
+const promptForValue = async (
+  rl: ReturnType<typeof createInterface>,
+  question: string,
+  options: {
+    currentValue?: string;
+    defaultValue?: string;
+    optional?: boolean;
+    secret?: boolean;
+  } = {}
+) => {
+  while (true) {
+    const hints: string[] = [];
+    if (isMeaningfulValue(options.currentValue)) {
+      hints.push(
+        options.secret ? 'currently set' : `current: ${options.currentValue}`
+      );
+    } else if (isMeaningfulValue(options.defaultValue)) {
+      hints.push(`default: ${options.defaultValue}`);
+    }
+
+    const suffix = hints.length > 0 ? ` (${hints.join(', ')})` : '';
+    const answer = (
+      await rl.question(`${pc.cyan(`${question}${suffix}:`)} ${ANSI_YELLOW}`)
+    ).trim();
+    process.stdout.write(ANSI_RESET);
+
+    if (answer.length > 0) {
+      return answer;
+    }
+
+    if (isMeaningfulValue(options.currentValue)) {
+      return options.currentValue!.trim();
+    }
+
+    if (isMeaningfulValue(options.defaultValue)) {
+      return options.defaultValue!.trim();
+    }
+
+    if (options.optional) {
+      return '';
+    }
+
+    process.stdout.write(pc.yellow('A value is required.\n'));
+  }
+};
+
+const promptForEnvValues = async (
+  values: EnvValues,
+  options: EnsureEnvOptions = {}
+) => {
+  const nextValues = { ...values };
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    for (const field of PROMPT_FIELDS) {
+      const currentValue = nextValues[field.key];
+      if (!options.force && isMeaningfulValue(currentValue)) {
+        continue;
+      }
+
+      const defaultValue = field.defaultValue?.(nextValues);
+      nextValues[field.key] = await promptForValue(rl, field.description, {
+        currentValue,
+        defaultValue,
+        optional: field.optional,
+        secret: field.secret
+      });
+
+      if (field.key === 'RELAY_PATH') {
+        nextValues.RELAY_PATH = normalizeRelayPath(nextValues.RELAY_PATH);
+      }
+
+      if (
+        field.key === 'RELAY_HOST' ||
+        field.key === 'RELAY_PORT' ||
+        field.key === 'RELAY_PATH'
+      ) {
+        nextValues.RELAY_URL = buildRelayUrl({
+          ...nextValues,
+          RELAY_URL: ''
+        });
+      }
+    }
+
+    return mergeRemoteCopilotEnvValues(
+      nextValues.APP_ENV as EnvMode,
+      nextValues
+    );
+  } finally {
+    rl.close();
+  }
+};
+
+const ensureEnvFile = async (
+  mode: EnvMode,
+  options: EnsureEnvOptions = {}
+): Promise<EnsureEnvResult> => {
+  const envPath = resolveEnvPath(mode);
+  const { values: mergedValues } = await loadRemoteCopilotEnv(mode, REPO_ROOT);
+  const hasMissingRequiredValues = hasMissingRequiredEnvValues(mergedValues);
+
+  const shouldPrompt =
+    options.force || !(await fileExists(envPath)) || hasMissingRequiredValues;
+  const finalValues = shouldPrompt
+    ? await promptForEnvValues(mergedValues, options)
+    : mergedValues;
+
+  return writeRemoteCopilotEnvFile(mode, finalValues, REPO_ROOT);
+};
+
+const printNextSteps = (result: EnsureEnvResult) => {
+  process.stdout.write(
+    `${pc.green('Saved')} ${pc.cyan(path.relative(REPO_ROOT, result.envPath) || result.envPath)}\n`
+  );
+  process.stdout.write(`${pc.bold(formatVsCodeSettings(result.values))}\n`);
+};
+
+const startRemoteControl = async (mode: EnvMode) => {
+  const result = await ensureEnvFile(mode);
+  applyEnvValuesToProcess(result.values);
+
+  await runRemoteControlStack({
+    onRelayReady: async (address: string) => {
+      process.stdout.write(
+        `${pc.green('Relay server listening on')} ${pc.cyan(address)}\n`
+      );
+    },
+    onStarted: async () => {
+      process.stdout.write(
+        `${pc.green('Remote Copilot stack started.')} Press ${pc.bold('Ctrl+C')} to stop.\n`
+      );
+    },
+    onStopping: async (signal: NodeJS.Signals) => {
+      process.stdout.write(
+        `${pc.yellow(`Received ${signal}. Shutting down...`)}\n`
+      );
+    },
+    onStopped: async () => {
+      process.stdout.write(`${pc.green('Remote Copilot stopped cleanly.')}\n`);
+    }
+  });
+};
+
+program
+  .name('copilot-rc')
+  .description(
+    'Initialize and run the Remote Copilot relay server and Discord bot.'
+  );
+
+program
+  .command('init')
+  .description(
+    'Create or update the local env file used by the relay server and Discord bot.'
+  )
+  .option(
+    '-e, --env <mode>',
+    'Environment file to configure (dev or prod).',
+    'dev'
+  )
+  .option('-f, --force', 'Prompt again for existing values.')
+  .action(async (options: { env: string; force?: boolean }) => {
+    const mode = options.env === 'prod' ? 'prod' : 'dev';
+    const result = await ensureEnvFile(mode, { force: options.force });
+    printNextSteps(result);
+  });
+
+program
+  .command('start')
+  .description(
+    'Start the relay server first and then the Discord bot in one command.'
+  )
+  .option('-e, --env <mode>', 'Environment file to use (dev or prod).', 'dev')
+  .action(async (options: { env: string }) => {
+    const mode = options.env === 'prod' ? 'prod' : 'dev';
+    await startRemoteControl(mode);
+  });
+
+const main = async () => {
+  await program.parseAsync(process.argv);
+};
+
+void main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${pc.red(`copilot-rc failed: ${message}`)}\n`);
+  process.exit(1);
+});

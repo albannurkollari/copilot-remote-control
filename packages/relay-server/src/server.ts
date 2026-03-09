@@ -22,6 +22,7 @@ export interface RelayServerOptions {
   host?: string;
   path?: string;
   port?: number;
+  sharedSecret?: string;
   verbose?: boolean;
 }
 
@@ -48,6 +49,7 @@ export class RelayServer {
   readonly host: string;
   readonly path: string;
   readonly port: number;
+  readonly sharedSecret?: string;
   readonly verbose: boolean;
 
   #httpServer?: HttpServer;
@@ -64,6 +66,7 @@ export class RelayServer {
     this.host = options.host ?? DEFAULT_HOST;
     this.path = options.path ?? DEFAULT_PATH;
     this.port = options.port ?? DEFAULT_PORT;
+    this.sharedSecret = options.sharedSecret?.trim() || undefined;
     this.verbose = options.verbose ?? false;
   }
 
@@ -244,6 +247,21 @@ export class RelayServer {
   }
 
   #registerClient(socket: WebSocket, message: RegisterMessage) {
+    if (
+      this.sharedSecret &&
+      (!message.sharedSecret || message.sharedSecret !== this.sharedSecret)
+    ) {
+      this.#sendStatus(
+        socket,
+        'error',
+        'authorization_required',
+        'Relay registration requires a valid shared secret.',
+        { clientId: message.clientId, targetClientRole: message.clientRole }
+      );
+      socket.close();
+      return;
+    }
+
     const connectionId = randomUUID();
     const nextClient: RegisteredClient = {
       clientId: message.clientId,
@@ -563,6 +581,7 @@ export const loadRelayServerOptions = (): RelayServerOptions => {
     host: process.env.RELAY_HOST ?? DEFAULT_HOST,
     path: process.env.RELAY_PATH ?? DEFAULT_PATH,
     port: Number.isNaN(port) ? DEFAULT_PORT : port,
+    sharedSecret: process.env.REMOTE_COPILOT_SHARED_SECRET?.trim(),
     verbose
   };
 };

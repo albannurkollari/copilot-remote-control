@@ -4,7 +4,8 @@ import {
   isRelayMessage,
   parseRelayMessage,
   serializeRelayMessage,
-  type CopilotPromptMessage
+  type CopilotPromptMessage,
+  type RegisterMessage
 } from './protocol.ts';
 
 describe('protocol helpers', () => {
@@ -41,5 +42,19 @@ describe('protocol helpers', () => {
   it('creates stable request and permission identifiers', () => {
     expect(createRequestId()).toMatch(/^req_/u);
     expect(createPermissionId()).toMatch(/^perm_/u);
+  });
+
+  it('parses register messages with an optional shared secret', () => {
+    const message: RegisterMessage = {
+      type: 'register',
+      clientId: 'workspace-1',
+      clientRole: 'vscode',
+      sharedSecret: 'super-secret'
+    };
+
+    const result = parseRelayMessage(serializeRelayMessage(message));
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value).toEqual(message);
   });
 });

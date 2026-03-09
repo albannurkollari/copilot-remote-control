@@ -1,6 +1,6 @@
 {
   "name": "@remote-copilot/shared",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "files": [
     "dist"

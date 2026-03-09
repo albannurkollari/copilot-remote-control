@@ -1,7 +1,7 @@
 import {
-    type CopilotPromptMessage,
-    type PermissionAction,
-    type PermissionRequestMessage
+  type CopilotPromptMessage,
+  type PermissionAction,
+  type PermissionRequestMessage
 } from '@remote-copilot/shared';
 import * as vscode from 'vscode';
 

@@ -43,18 +43,44 @@ Discord user
 - A **Discord application + bot token** from the Discord Developer Portal
 - A Discord server where you can install the bot
 
+## Must know before you start
+
+Each developer must use their own Discord bot application and secrets.
+The bot is intended to be self-hosted alongside the relay server and your VS Code session.
+
+### 1. Create your Discord bot project
+
+1. Open the Discord Developer Portal.
+2. Create a new application.
+3. Add a bot user to that application.
+4. Copy these values for later:
+
+- Application ID
+- Bot token
+- Your Discord server ID
+
+1. Invite the bot to your own server with the permissions needed for slash commands.
+
+### 2. Initialize local configuration
+
+From the repository root:
+
+1. Install dependencies with `pnpm install`
+2. Run `pnpm dev:init`
+3. Answer the interactive prompts for your Discord and relay configuration
+4. Copy the printed `remoteCopilot.clientId`, `remoteCopilot.relayUrl`, and `remoteCopilot.sharedSecret` values into VS Code settings
+
 ## Quick start
 
 From the repository root:
 
 1. Install dependencies with `pnpm install`
-2. Generate local env files with `pnpm env:generate`
-3. Fill in `.env.dev` using [examples/.env.example](examples/.env.example)
-4. Start the relay server
-5. Start the Discord bot
-6. Run the VS Code extension in an Extension Development Host
-7. Authorize Copilot access in VS Code
-8. Run `/copilot` in Discord
+2. Run `pnpm dev:init`
+3. Start the relay server and Discord bot together with `pnpm dev:stack`
+4. Run the VS Code extension in an Extension Development Host
+5. Paste the printed `remoteCopilot.*` values into your VS Code settings
+6. Authorize Copilot access in VS Code
+7. Run `/copilot` in Discord
 
 For the full local setup, see [docs/local-development.md](docs/local-development.md).
 
@@ -67,9 +93,28 @@ Use `/copilot` in Discord, choose a mode, and enter a prompt. The reply is strea
 - [Local development](docs/local-development.md)
 - [Privacy Policy](docs/privacy-policy.md)
 - [Terms of Service](docs/terms-of-service.md)
-- [Project TODO](TODO.md)
+- [Project TODO](todo.md)
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+
+## Publishing
+
+This repository now ships in two lanes:
+
+1. `copilot-rc` is published to npm.
+2. `remote-copilot-host` is published to the VS Code Marketplace.
+
+The CI workflow in [.github/workflows/publish.yml](.github/workflows/publish.yml) runs npm publishing first and only publishes the extension after a successful release.
+
+Required repository secrets:
+
+- `NPM_TOKEN` for publishing [packages/copilot-rc](packages/copilot-rc/package.json)
+- `VSCE_PAT` for publishing the VS Code extension from [packages/vscode-extension](packages/vscode-extension/package.json)
+
+Useful commands:
+
+- `pnpm release:dry-run` to preview semantic-release locally
+- `pnpm publish:extension` to publish the VS Code extension when `RELEASE_VERSION` and `VSCE_PAT` are set
 
 ## Current limitations
 

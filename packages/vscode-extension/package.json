@@ -2,14 +2,15 @@
   "name": "remote-copilot-host",
   "displayName": "Remote Copilot Host",
   "version": "1.0.0",
-  "description": "Bridge Discord prompts to GitHub Copilot through a WebSocket relay.",
+  "description": "Control GitHub Copilot remotely through a WebSocket relay host.",
   "categories": [
     "Other"
   ],
   "keywords": [
     "automation",
+    "controller",
     "copilot",
-    "discord",
+    "host",
     "relay",
     "remote"
   ],
@@ -23,8 +24,9 @@
     "url": "https://github.com/albannurkollari/copilot-remote-control.git",
     "directory": "packages/vscode-extension"
   },
-  "publisher": "albannurkollari",
+  "publisher": "erenndriel",
   "files": [
+    "assets",
     "dist",
     "LICENSE",
     "README.md"
@@ -43,7 +45,8 @@
     "clean": "rm -rfd dist",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "vscode:prepublish": "pnpm run build",
-    "package": "node ./scripts/package.ts"
+    "package": "node ./scripts/vsce.ts --package",
+    "publish:marketplace": "node ./scripts/vsce.ts --publish"
   },
   "devDependencies": {
     "@remote-copilot/shared": "workspace:*",
@@ -101,6 +104,7 @@
   "extensionKind": [
     "ui"
   ],
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.109.0"
   }
