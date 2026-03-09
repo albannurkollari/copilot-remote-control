@@ -2,25 +2,24 @@
 
 ## Run locally
 
-- [ ] Create a Discord bot in the Discord Developer Portal
-- [ ] Invite the bot to your test server
-- [ ] Fill in `.env.dev` from [examples/.env.example](examples/.env.example)
-- [ ] Start the relay server
-- [ ] Start the Discord bot
-- [ ] Run the VS Code extension in an Extension Development Host
-- [ ] Set `remoteCopilot.clientId` and `remoteCopilot.relayUrl` in VS Code
-- [ ] Run `Remote Copilot: Authorize Copilot Access`
-- [ ] Test `/copilot` from Discord
+- [x] Create a Discord bot in the Discord Developer Portal
+- [x] Invite the bot to your test server
+- [x] Fill in `.env.dev` from [examples/.env.example](examples/.env.example)
+- [x] Start the relay server
+- [x] Start the Discord bot
+- [x] Run the VS Code extension in an Extension Development Host
+- [x] Set `remoteCopilot.clientId` and `remoteCopilot.relayUrl` in VS Code
+- [x] Run `Remote Copilot: Authorize Copilot Access`
+- [x] Test `/copilot` from Discord
 
 For the exact local run flow, see [docs/local-development.md](docs/local-development.md).
 
 ## Release setup
 
-- [ ] Verify the release workflow is enabled in [.github/workflows/release.yml](.github/workflows/release.yml)
-- [ ] Add the `MV_RELEASE_PAT` repository secret if PAT-based release triggering is required
-- [ ] Confirm pushes to `main` should remain the only release trigger
-- [ ] Test release logic with `pnpm release:dry-run`
-- [ ] Merge a real `feat` or `fix` commit into `main` and confirm release and tag creation
+- [x] Verify the release workflow is enabled in [.github/workflows/release.yml](.github/workflows/release.yml)
+- [x] Confirm pushes to `main` should remain the only release trigger
+- [x] Test release logic with `pnpm release:dry-run`
+- [x] Merge a real `feat` or `fix` commit into `main` and confirm release and tag creation
 
 ## VS Code Marketplace shipping
 
@@ -33,9 +32,9 @@ For the exact local run flow, see [docs/local-development.md](docs/local-develop
 
 ## Open product gaps
 
-- [ ] Implement remote permission approval flow in Discord instead of auto-deny
+- [x] Implement remote permission approval flow in Discord instead of auto-deny
 - [ ] Add authentication or shared-secret security for relay clients
-- [ ] Add end-to-end CI coverage
+- [x] Add end-to-end CI coverage
 - [ ] Add Marketplace packaging documentation
 
 ## Suggested order
