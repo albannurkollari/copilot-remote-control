@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url';
 import { type PermissionRequestMessage } from '@remote-copilot/shared';
 import {
   ActionRowBuilder,
@@ -11,12 +10,14 @@ import {
   ModalBuilder,
   REST,
   Routes,
-  type ChatInputCommandInteraction,
-  type Message,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  type ChatInputCommandInteraction,
+  type Message
 } from 'discord.js';
+import { pathToFileURL } from 'node:url';
 import pc from 'picocolors';
+
 import {
   buildCopilotPromptMessage,
   COPILOT_COMMAND_NAME,

@@ -1,4 +1,5 @@
 import type { SpawnSyncReturns } from 'node:child_process';
+
 import { execSync } from 'node:child_process';
 import pc from 'picocolors';
 

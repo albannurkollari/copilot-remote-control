@@ -1,4 +1,3 @@
-import { setTimeout as delay } from 'node:timers/promises';
 import {
   parseRelayMessage,
   serializeRelayMessage,
@@ -8,6 +7,7 @@ import {
   type PermissionResponseMessage,
   type RelayStatusMessage
 } from '@remote-copilot/shared';
+import { setTimeout as delay } from 'node:timers/promises';
 import * as vscode from 'vscode';
 import WebSocket from 'ws';
 

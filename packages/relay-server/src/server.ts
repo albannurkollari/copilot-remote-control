@@ -1,6 +1,3 @@
-import { randomUUID } from 'node:crypto';
-import { createServer, type Server as HttpServer } from 'node:http';
-import { pathToFileURL } from 'node:url';
 import {
   createPongMessage,
   parseRelayMessage,
@@ -15,6 +12,9 @@ import {
   type RelayStatusCode,
   type RelayStatusLevel
 } from '@remote-copilot/shared';
+import { randomUUID } from 'node:crypto';
+import { createServer, type Server as HttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 import pc from 'picocolors';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 

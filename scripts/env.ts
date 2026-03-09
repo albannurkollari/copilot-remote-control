@@ -3,6 +3,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import pc from 'picocolors';
+
 import { CommandBuilder, ProcessState } from './commands.ts';
 
 const READ_OPTIONS = { encoding: 'utf8' } as const;
