@@ -3,6 +3,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import pc from 'picocolors';
+
 import { CommandBuilder, ProcessState } from './commands.ts';
 
 const APPS_DIR = 'packages';

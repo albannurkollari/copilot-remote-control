@@ -1,5 +1,6 @@
 import { createRequestId, type RelayMessage } from '@remote-copilot/shared';
 import { WebSocket } from 'ws';
+
 import { RelayServer } from './server.js';
 
 const waitForOpen = (socket: WebSocket) => {

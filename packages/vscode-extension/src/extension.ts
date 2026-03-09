@@ -3,6 +3,7 @@ import {
   type PermissionRequestMessage
 } from '@remote-copilot/shared';
 import * as vscode from 'vscode';
+
 import { CopilotBridge } from './copilotBridge.js';
 import { VscodeRelayClient } from './relayClient.js';
 

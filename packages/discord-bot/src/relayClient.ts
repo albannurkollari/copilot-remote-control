@@ -1,4 +1,3 @@
-import { EventEmitter } from 'node:events';
 import {
   parseRelayMessage,
   serializeRelayMessage,
@@ -9,6 +8,7 @@ import {
   type RegisterAckMessage,
   type RelayStatusMessage
 } from '@remote-copilot/shared';
+import { EventEmitter } from 'node:events';
 import { WebSocket } from 'ws';
 
 export interface RelayDiscordClientOptions {
