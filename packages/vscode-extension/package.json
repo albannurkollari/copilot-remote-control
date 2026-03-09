@@ -12,12 +12,6 @@
   ],
   "type": "module",
   "main": "./dist/extension.js",
-  "imports": {
-    "#discord/*": "../discord-bot/src/*",
-    "#relay/*": "../relay-server/src/*",
-    "#shared/*": "../shared/src/*",
-    "#extension/*": "./src/*"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

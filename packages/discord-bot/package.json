@@ -6,12 +6,6 @@
     "dist"
   ],
   "type": "module",
-  "imports": {
-    "#discord/*": "./src/*",
-    "#relay/*": "../relay-server/src/*",
-    "#shared/*": "../shared/src/*",
-    "#extension/*": "../vscode-extension/src/*"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

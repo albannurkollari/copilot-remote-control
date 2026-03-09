@@ -8,12 +8,6 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "imports": {
-    "#discord/*": "../discord-bot/src/*",
-    "#relay/*": "../relay-server/src/*",
-    "#shared/*": "./src/*",
-    "#extension/*": "../vscode-extension/src/*"
-  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
