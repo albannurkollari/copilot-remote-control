@@ -47,8 +47,6 @@
     "test": "node --eval \"console.log('No tests yet for copilot-rc.')\""
   },
   "dependencies": {
-    "@remote-copilot/discord-bot": "workspace:*",
-    "@remote-copilot/relay-server": "workspace:*",
     "commander": "^14.0.1",
     "discord.js": "^14.25.1",
     "picocolors": "^1.1.1"
