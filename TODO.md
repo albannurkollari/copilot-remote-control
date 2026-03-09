@@ -18,7 +18,7 @@ For the exact local run flow, see [docs/local-development.md](docs/local-develop
 - [x] Verify the publish workflow is enabled in [.github/workflows/publish.yml](.github/workflows/publish.yml)
 - [x] Confirm release automation runs from pushes to `main` and supports manual dispatch
 - [x] Test release logic with `pnpm release:dry-run`
-- [ ] Confirm a real `feat` or `fix` merged to `main` creates the release and tag end to end
+- [ ] Confirm a real `fix` merged to `main` retries the release and tag flow end to end
 
 ## VS Code Marketplace shipping
 
