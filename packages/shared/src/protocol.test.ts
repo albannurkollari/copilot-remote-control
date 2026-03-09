@@ -5,7 +5,7 @@ import {
   parseRelayMessage,
   serializeRelayMessage,
   type CopilotPromptMessage
-} from './protocol.js';
+} from './protocol.ts';
 
 describe('protocol helpers', () => {
   it('parses valid prompt messages', () => {

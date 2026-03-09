@@ -4,8 +4,8 @@ import {
 } from '@remote-copilot/shared';
 import * as vscode from 'vscode';
 
-import { CopilotBridge } from './copilotBridge.js';
-import { VscodeRelayClient } from './relayClient.js';
+import { CopilotBridge } from './copilotBridge.ts';
+import { VscodeRelayClient } from './relayClient.ts';
 
 interface RemoteCopilotConfiguration {
   clientId: string;

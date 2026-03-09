@@ -1,4 +1,4 @@
-import { buildCopilotPromptMessage, createCopilotCommand } from './copilot.js';
+import { buildCopilotPromptMessage, createCopilotCommand } from './copilot.ts';
 
 describe('copilot command', () => {
   it('defines the expected slash command shape', () => {

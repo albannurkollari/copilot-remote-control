@@ -3,6 +3,8 @@
     "baseUrl": ".",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "target": "esnext",
     "strict": true,
     "types": ["node", "vitest/globals"]

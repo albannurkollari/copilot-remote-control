@@ -1,37 +1,60 @@
 {
-  "name": "@remote-copilot/vscode-extension",
-  "displayName": "Remote Copilot Bridge",
-  "version": "0.0.1",
-  "private": true,
+  "name": "remote-copilot-host",
+  "displayName": "Remote Copilot Host",
+  "version": "1.0.0",
   "description": "Bridge Discord prompts to GitHub Copilot through a WebSocket relay.",
   "categories": [
     "Other"
   ],
+  "keywords": [
+    "automation",
+    "copilot",
+    "discord",
+    "relay",
+    "remote"
+  ],
+  "homepage": "https://github.com/albannurkollari/copilot-remote-control/tree/main/packages/vscode-extension",
+  "bugs": {
+    "url": "https://github.com/albannurkollari/copilot-remote-control/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/albannurkollari/copilot-remote-control.git",
+    "directory": "packages/vscode-extension"
+  },
+  "publisher": "albannurkollari",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "type": "module",
-  "main": "./dist/extension.js",
+  "main": "./dist/extension.cjs",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/index.d.cts",
+      "default": "./dist/index.cjs"
     }
   },
   "scripts": {
     "dev": "node --eval \"console.log('Run this package in the VS Code extension host during development.')\"",
     "build": "tsup",
     "clean": "rm -rfd dist",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@remote-copilot/shared": "workspace:*",
-    "ws": "^8.19.0"
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "vscode:prepublish": "pnpm run build",
+    "package": "node ./scripts/package.ts"
   },
   "devDependencies": {
+    "@remote-copilot/shared": "workspace:*",
+    "@types/node": "^25.3.5",
     "@types/vscode": "^1.109.0",
     "@types/ws": "^8.18.1",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "ws": "^8.19.0"
   },
   "contributes": {
     "commands": [
@@ -67,7 +90,7 @@
         "remoteCopilot.relayUrl": {
           "type": "string",
           "default": "ws://127.0.0.1:8787/",
-          "description": "WebSocket relay URL used by the remote Copilot bridge."
+          "description": "WebSocket relay URL used by the remote Copilot host."
         }
       }
     }
@@ -75,7 +98,10 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "extensionKind": [
+    "ui"
+  ],
   "engines": {
-    "vscode": "^1.105.0"
+    "vscode": "^1.109.0"
   }
 }
