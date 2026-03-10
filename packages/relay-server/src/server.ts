@@ -1,17 +1,17 @@
 import {
-    createPongMessage,
-    parseRelayMessage,
-    serializeRelayMessage,
-    type ClientRole,
+  createPongMessage,
+  parseRelayMessage,
+  serializeRelayMessage,
+  type ClientRole,
   type CopilotCancelMessage,
-    type CopilotPromptMessage,
-    type CopilotStreamMessage,
-    type PermissionRequestMessage,
-    type PermissionResponseMessage,
-    type RegisterMessage,
-    type RelayMessage,
-    type RelayStatusCode,
-    type RelayStatusLevel
+  type CopilotPromptMessage,
+  type CopilotStreamMessage,
+  type PermissionRequestMessage,
+  type PermissionResponseMessage,
+  type RegisterMessage,
+  type RelayMessage,
+  type RelayStatusCode,
+  type RelayStatusLevel
 } from '@remote-copilot/shared';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';

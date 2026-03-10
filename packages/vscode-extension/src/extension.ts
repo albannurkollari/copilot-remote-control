@@ -1,6 +1,6 @@
 import {
-    type CopilotPromptMessage,
-    type PermissionRequestMessage
+  type CopilotPromptMessage,
+  type PermissionRequestMessage
 } from '@remote-copilot/shared';
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
@@ -66,7 +66,8 @@ const getSharedSecretTarget = () => {
 const ensureSharedSecret = async (options?: { copyToClipboard?: boolean }) => {
   const configuration = vscode.workspace.getConfiguration('remoteCopilot');
   const currentValue = configuration.get<string>('sharedSecret', '').trim();
-  const sharedSecret = currentValue.length > 0 ? currentValue : createSharedSecret();
+  const sharedSecret =
+    currentValue.length > 0 ? currentValue : createSharedSecret();
 
   if (currentValue.length === 0) {
     await configuration.update(

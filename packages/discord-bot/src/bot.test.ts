@@ -9,8 +9,14 @@ describe('discord bot approval helpers', () => {
   });
 
   it('parses supported approval actions and rejects the removed session action', () => {
-    const approveCustomId = __testing.createApprovalCustomId('perm-1', 'approve');
-    const ttlCustomId = __testing.createApprovalCustomId('perm-1', 'approve_ttl');
+    const approveCustomId = __testing.createApprovalCustomId(
+      'perm-1',
+      'approve'
+    );
+    const ttlCustomId = __testing.createApprovalCustomId(
+      'perm-1',
+      'approve_ttl'
+    );
     const cancelCustomId = __testing.createPromptCustomId('req-1', 'cancel');
 
     expect(__testing.parseApprovalCustomId(approveCustomId)).toEqual({
