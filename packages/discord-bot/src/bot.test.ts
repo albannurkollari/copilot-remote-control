@@ -78,6 +78,212 @@ describe('discord bot approval helpers', () => {
     ).toBe('user-1:workspace-1:edit_file');
     expect(__testing.formatApprovalTtlLabel(60_000)).toBe('Allow 1 min');
   });
+
+  it('formats durations across seconds and minute boundaries', () => {
+    expect(__testing.formatDuration(500)).toBe('1s');
+    expect(__testing.formatDuration(60_000)).toBe('1m');
+    expect(__testing.formatDuration(61_000)).toBe('1m 1s');
+  });
+
+  it('truncates long text and leaves short text untouched', () => {
+    expect(__testing.truncateText('abc', 10)).toBe('abc');
+    expect(__testing.truncateText('abcdef', 4)).toBe('abc…');
+  });
+
+  it('detects Discord API errors and formats generic errors', () => {
+    const apiError = Object.assign(new Error('gone'), { code: 10062 });
+    expect(__testing.isDiscordApiError(apiError, 10062)).toBe(true);
+    expect(__testing.isDiscordApiError(new Error('gone'), 10062)).toBe(false);
+    expect(__testing.toErrorMessage(new Error('boom'))).toBe('boom');
+    expect(__testing.toErrorMessage('boom')).toBe('boom');
+  });
+
+  it('creates prompt action components with a cancel button', () => {
+    const [row] = __testing.createPromptActionComponents('req-1');
+    expect(row.toJSON()).toEqual(
+      expect.objectContaining({
+        components: [
+          expect.objectContaining({
+            custom_id: 'remoteCopilot:prompt:cancel:req-1',
+            label: 'Cancel'
+          })
+        ]
+      })
+    );
+  });
+
+  it('takes pending approval entries and clears their timeout', () => {
+    const timeout = setTimeout(() => undefined, 1000);
+    const pending = {
+      message: { edit: vi.fn() },
+      request: {
+        type: 'permission_request',
+        action: 'edit_file',
+        clientId: 'workspace-1',
+        permissionId: 'perm-1',
+        requestId: 'req-1',
+        title: 'Edit file'
+      },
+      requesterId: 'user-1',
+      resolve: vi.fn(),
+      timeout
+    };
+    const pendingApprovals = new Map([['perm-1', pending as never]]);
+
+    expect(__testing.takePendingApproval(pendingApprovals, 'perm-1')).toBe(
+      pending
+    );
+    expect(pendingApprovals.size).toBe(0);
+    expect(__testing.takePendingApproval(pendingApprovals, 'perm-1')).toBe(
+      undefined
+    );
+  });
+
+  it('takes pending prompt entries when present', () => {
+    const pending = { cancel: vi.fn(), requesterId: 'user-1' };
+    const pendingPrompts = new Map([['req-1', pending as never]]);
+
+    expect(__testing.takePendingPrompt(pendingPrompts, 'req-1')).toBe(pending);
+    expect(pendingPrompts.size).toBe(0);
+    expect(__testing.takePendingPrompt(pendingPrompts, 'req-1')).toBe(
+      undefined
+    );
+  });
+
+  it('sends ephemeral replies via reply or followUp as needed', async () => {
+    const replyInteraction = {
+      deferred: false,
+      replied: false,
+      followUp: vi.fn(),
+      reply: vi.fn().mockResolvedValue(undefined)
+    } as never;
+    const followUpInteraction = {
+      deferred: true,
+      replied: false,
+      followUp: vi.fn().mockResolvedValue(undefined),
+      reply: vi.fn()
+    } as never;
+
+    await __testing.sendEphemeralResponse(replyInteraction, 'hello');
+    expect((replyInteraction as any).reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'hello', flags: 64 })
+    );
+
+    await __testing.sendEphemeralResponse(followUpInteraction, 'hello');
+    expect((followUpInteraction as any).followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'hello', flags: 64 })
+    );
+  });
+});
+
+describe('BufferedReply', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('starts by deferring the interaction and showing processing state', async () => {
+    const interaction = {
+      deferred: false,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      replied: false,
+      deferReply: vi.fn().mockResolvedValue(undefined)
+    } as never;
+
+    const reply = new __testing.BufferedReply(interaction, 10);
+    await reply.start();
+
+    expect((interaction as any).deferReply).toHaveBeenCalled();
+    expect((interaction as any).editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Processing…', components: [] })
+    );
+  });
+
+  it('rewrites expired interaction errors to a user-facing message', async () => {
+    const interaction = {
+      deferred: false,
+      editReply: vi.fn(),
+      replied: false,
+      deferReply: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('expired'), { code: 10062 }))
+    } as never;
+
+    const reply = new __testing.BufferedReply(interaction, 10);
+
+    await expect(reply.start()).rejects.toThrow(
+      'Discord no longer recognizes this interaction. The command likely expired before it could be acknowledged.'
+    );
+  });
+
+  it('schedules flushes, truncates long content, and finalizes once', async () => {
+    const interaction = {
+      deferred: true,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      replied: false,
+      deferReply: vi.fn()
+    } as never;
+
+    const reply = new __testing.BufferedReply(interaction, 10);
+    reply.append('a'.repeat(2_000));
+    reply.addNote('note');
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect((interaction as any).editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('…truncated')
+      })
+    );
+
+    await reply.finish();
+    const callCount = (interaction as any).editReply.mock.calls.length;
+    await reply.finish();
+    expect((interaction as any).editReply.mock.calls.length).toBe(callCount);
+  });
+
+  it('supports flushNow, fail, and clearing components', async () => {
+    const interaction = {
+      deferred: true,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      replied: false,
+      deferReply: vi.fn()
+    } as never;
+
+    const reply = new __testing.BufferedReply(interaction, 10);
+    const [row] = __testing.createPromptActionComponents('req-1');
+    reply.setComponents([row]);
+    reply.clearComponents();
+    await reply.flushNow();
+    expect((interaction as any).editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ components: [] })
+    );
+
+    await reply.fail('boom');
+    expect((interaction as any).editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Error: boom')
+      })
+    );
+  });
+
+  it('ignores empty appended text', async () => {
+    const interaction = {
+      deferred: true,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      replied: false,
+      deferReply: vi.fn()
+    } as never;
+
+    const reply = new __testing.BufferedReply(interaction, 10);
+    reply.append('');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect((interaction as any).editReply).not.toHaveBeenCalled();
+  });
 });
 
 describe('loadDiscordBotConfig', () => {
