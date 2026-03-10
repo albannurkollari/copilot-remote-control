@@ -537,3 +537,18 @@ export async function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   return undefined;
 }
+
+export const __testing = {
+  MAX_TRANSCRIPTS,
+  TRANSCRIPT_STORAGE_KEY,
+  clearTranscripts,
+  createSharedSecret,
+  ensureSharedSecret,
+  fenceFor,
+  getSharedSecretTarget,
+  loadConfiguration,
+  renderTranscriptMarkdown,
+  saveTranscript,
+  toErrorMessage,
+  validateConfiguration
+};

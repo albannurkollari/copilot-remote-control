@@ -1,4 +1,8 @@
-import { buildCopilotPromptMessage, createCopilotCommand } from './copilot.ts';
+import {
+  buildCopilotPromptMessage,
+  createCopilotCommand,
+  parseCopilotCommand
+} from './copilot.ts';
 
 describe('copilot command', () => {
   it('defines the expected slash command shape', () => {
@@ -17,5 +21,15 @@ describe('copilot command', () => {
     expect(message.type).toBe('copilot_prompt');
     expect(message.clientId).toBe('workspace-1');
     expect(message.requestId).toMatch(/^req_/u);
+  });
+
+  it('rejects empty command prompts after trimming', () => {
+    expect(() =>
+      parseCopilotCommand({
+        options: {
+          getString: (_name: string) => '   '
+        }
+      } as never)
+    ).toThrow('Prompt cannot be empty.');
   });
 });
