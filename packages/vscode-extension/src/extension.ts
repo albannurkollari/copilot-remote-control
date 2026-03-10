@@ -1,6 +1,6 @@
 import {
-  type CopilotPromptMessage,
-  type PermissionRequestMessage
+    type CopilotPromptMessage,
+    type PermissionRequestMessage
 } from '@remote-copilot/shared';
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
@@ -10,6 +10,7 @@ import { VscodeRelayClient } from './relayClient.ts';
 
 interface RemoteCopilotConfiguration {
   clientId: string;
+  maxSessionMessages: number;
   relayUrl: string;
   sharedSecret: string;
 }
@@ -93,10 +94,15 @@ const loadConfiguration = (): RemoteCopilotConfiguration => {
   const relayUrl = configuration
     .get<string>('relayUrl', 'ws://127.0.0.1:8787/')
     .trim();
+  const maxSessionMessages = configuration.get<number>(
+    'maxSessionMessages',
+    24
+  );
   const sharedSecret = configuration.get<string>('sharedSecret', '').trim();
 
   return {
     clientId,
+    maxSessionMessages,
     relayUrl,
     sharedSecret
   };
@@ -238,7 +244,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const secretState = await ensureSharedSecret({ copyToClipboard: true });
   const configuration = loadConfiguration();
   const configurationIssues = validateConfiguration(configuration);
-  const bridge = new CopilotBridge(context, outputChannel);
+  const bridge = new CopilotBridge(context, outputChannel, {
+    maxSessionMessages: configuration.maxSessionMessages
+  });
   const relayClient = new VscodeRelayClient({
     clientId: configuration.clientId,
     outputChannel,
@@ -251,7 +259,6 @@ export async function activate(context: vscode.ExtensionContext) {
     if (message === lastRelayWarning) {
       return;
     }
-
     lastRelayWarning = message;
     const action = await vscode.window.showWarningMessage<RelayHelpAction>(
       `${message} Check your Remote Copilot settings and make sure the relay server is running.`,
@@ -410,6 +417,15 @@ export async function activate(context: vscode.ExtensionContext) {
         } catch (error) {
           void vscode.window.showErrorMessage(toErrorMessage(error));
         }
+      }
+    ),
+    vscode.commands.registerCommand(
+      'remoteCopilot.clearSharedSession',
+      async () => {
+        bridge.clearSharedConversation();
+        void vscode.window.showInformationMessage(
+          'Remote Copilot shared session cleared.'
+        );
       }
     ),
     vscode.commands.registerCommand(

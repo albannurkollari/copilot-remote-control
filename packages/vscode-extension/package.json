@@ -70,6 +70,10 @@
         "title": "Remote Copilot: Copy Shared Secret"
       },
       {
+        "command": "remoteCopilot.clearSharedSession",
+        "title": "Remote Copilot: Clear Shared Session"
+      },
+      {
         "command": "remoteCopilot.showRelayOutput",
         "title": "Remote Copilot: Show Relay Output"
       },
@@ -103,6 +107,12 @@
           "type": "string",
           "default": "",
           "description": "Shared secret owned by this VS Code extension. Use 'Remote Copilot: Copy Shared Secret' to generate or copy it for copilot-rc init."
+        },
+        "remoteCopilot.maxSessionMessages": {
+          "type": "number",
+          "default": 24,
+          "minimum": 1,
+          "description": "Maximum number of Copilot conversation messages retained in the shared in-memory session."
         }
       }
     }

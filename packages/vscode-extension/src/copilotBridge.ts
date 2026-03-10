@@ -39,6 +39,11 @@ type ToolExecutionPlan =
   | FileEditExecution
   | VsCodeCommandExecution;
 
+export interface CopilotBridgeOptions {
+  maxSessionMessages?: number;
+}
+
+const DEFAULT_MAX_SESSION_MESSAGES = 24;
 const REMOTE_COPILOT_TERMINAL_NAME = 'Remote Copilot';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -72,6 +77,22 @@ const renderPromptText = (message: CopilotPromptMessage) => {
     `Ctx:${message.userDisplayName ?? 'unknown'}@${message.clientId}`,
     message.prompt
   ].join('\n');
+};
+
+const normalizeMaxSessionMessages = (value?: number) => {
+  if (value === undefined || Number.isNaN(value)) {
+    return DEFAULT_MAX_SESSION_MESSAGES;
+  }
+
+  return Math.max(1, Math.floor(value));
+};
+
+const trimConversation = <T>(messages: T[], maxMessages: number) => {
+  if (messages.length <= maxMessages) {
+    return [...messages];
+  }
+
+  return messages.slice(-maxMessages);
 };
 
 const normalizeWorkspaceRelativePath = (filePath: string) => {
@@ -220,6 +241,7 @@ export class CopilotBridge {
       tokenSource: vscode.CancellationTokenSource;
     }
   >();
+  #maxSessionMessages: number;
   #outputChannel: vscode.OutputChannel;
   #runQueue = Promise.resolve();
   #sharedConversation: vscode.LanguageModelChatMessage[] = [];
@@ -227,9 +249,13 @@ export class CopilotBridge {
 
   constructor(
     context: vscode.ExtensionContext,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    options: CopilotBridgeOptions = {}
   ) {
     this.#context = context;
+    this.#maxSessionMessages = normalizeMaxSessionMessages(
+      options.maxSessionMessages
+    );
     this.#outputChannel = outputChannel;
   }
 
@@ -285,6 +311,14 @@ export class CopilotBridge {
     return true;
   }
 
+  clearSharedConversation() {
+    this.#sharedConversation = [];
+  }
+
+  getSharedConversationSize() {
+    return this.#sharedConversation.length;
+  }
+
   async runPrompt(message: CopilotPromptMessage, handlers: RunPromptHandlers) {
     const run = async () => {
       await this.#runPromptInSession(message, handlers);
@@ -322,7 +356,10 @@ export class CopilotBridge {
     const userMessage = api.LanguageModelChatMessage.User(
       this.#renderPrompt(message)
     );
-    const conversation = [...this.#sharedConversation, userMessage];
+    const conversation = trimConversation(
+      [...this.#sharedConversation, userMessage],
+      this.#maxSessionMessages
+    );
 
     try {
       if (tokenSource.token.isCancellationRequested) {
@@ -351,7 +388,10 @@ export class CopilotBridge {
         );
       }
 
-      this.#sharedConversation = conversation;
+      this.#sharedConversation = trimConversation(
+        conversation,
+        this.#maxSessionMessages
+      );
     } catch (error) {
       throw new Error(this.#toUserFacingError(error, message.requestId));
     } finally {
@@ -653,9 +693,12 @@ export class CopilotBridge {
 export const __testing = {
   createExecutionResult,
   createModeInstruction,
+  DEFAULT_MAX_SESSION_MESSAGES,
+  normalizeMaxSessionMessages,
   remoteTools: REMOTE_TOOLS,
   normalizeWorkspaceRelativePath,
   renderPromptText,
+  trimConversation,
   toCommandArgs,
   toToolExecutionPlan
 };

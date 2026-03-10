@@ -170,6 +170,19 @@ describe('copilot bridge tool execution helpers', () => {
     );
   });
 
+  it('normalizes max retained session messages', () => {
+    expect(__testing.normalizeMaxSessionMessages()).toBe(
+      __testing.DEFAULT_MAX_SESSION_MESSAGES
+    );
+    expect(__testing.normalizeMaxSessionMessages(0)).toBe(1);
+    expect(__testing.normalizeMaxSessionMessages(5.8)).toBe(5);
+  });
+
+  it('trims retained conversation to the newest messages', () => {
+    expect(__testing.trimConversation([1, 2, 3, 4], 2)).toEqual([3, 4]);
+    expect(__testing.trimConversation([1, 2], 4)).toEqual([1, 2]);
+  });
+
   it('reuses shared conversation across prompts', async () => {
     const capturedConversations: unknown[] = [];
     const model = {
@@ -258,5 +271,132 @@ describe('copilot bridge tool execution helpers', () => {
         content: 'Reply briefly.\nCtx:alice@default\nSecond prompt'
       }
     ]);
+  });
+
+  it('caps retained shared conversation size', async () => {
+    const capturedConversations: unknown[] = [];
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi
+        .fn()
+        .mockImplementationOnce(async (messages: unknown) => {
+          capturedConversations.push(JSON.parse(JSON.stringify(messages)));
+          return {
+            stream: toAsyncIterable([
+              new mockVscode.LanguageModelTextPart('First reply')
+            ]),
+            text: toAsyncIterable([])
+          };
+        })
+        .mockImplementationOnce(async (messages: unknown) => {
+          capturedConversations.push(JSON.parse(JSON.stringify(messages)));
+          return {
+            stream: toAsyncIterable([
+              new mockVscode.LanguageModelTextPart('Second reply')
+            ]),
+            text: toAsyncIterable([])
+          };
+        })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never,
+      { maxSessionMessages: 2 }
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'First prompt',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn()
+      }
+    );
+
+    expect(bridge.getSharedConversationSize()).toBe(2);
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-2',
+        mode: 'ask',
+        prompt: 'Second prompt',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn()
+      }
+    );
+
+    expect(bridge.getSharedConversationSize()).toBe(2);
+    expect(capturedConversations[1]).toEqual([
+      {
+        role: 'assistant',
+        content: 'First reply'
+      },
+      {
+        role: 'user',
+        content: 'Reply briefly.\nCtx:alice@default\nSecond prompt'
+      }
+    ]);
+  });
+
+  it('clears the shared conversation on demand', async () => {
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([
+          new mockVscode.LanguageModelTextPart('Reply')
+        ]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'First prompt',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn()
+      }
+    );
+
+    expect(bridge.getSharedConversationSize()).toBeGreaterThan(0);
+
+    bridge.clearSharedConversation();
+
+    expect(bridge.getSharedConversationSize()).toBe(0);
   });
 });
