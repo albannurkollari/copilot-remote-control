@@ -1,7 +1,12 @@
 import { createRequestId, type RelayMessage } from '@remote-copilot/shared';
+import { afterEach } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { RelayServer } from './server.ts';
+import {
+  RelayServer,
+  loadRelayServerOptions,
+  startRelayServer
+} from './server.ts';
 
 const waitForOpen = (socket: WebSocket) => {
   return new Promise<void>((resolve, reject) => {
@@ -19,6 +24,12 @@ const nextMessage = (socket: WebSocket) => {
   });
 };
 
+const waitForClose = (socket: WebSocket) => {
+  return new Promise<void>((resolve) => {
+    socket.once('close', () => resolve());
+  });
+};
+
 const createSocket = async (address: string) => {
   const socket = new WebSocket(address);
   await waitForOpen(socket);
@@ -27,9 +38,38 @@ const createSocket = async (address: string) => {
 
 describe('RelayServer', () => {
   const servers: RelayServer[] = [];
+  const originalEnv = { ...process.env };
+  const originalArgv = [...process.argv];
 
   afterEach(async () => {
+    process.env = { ...originalEnv };
+    process.argv = [...originalArgv];
     await Promise.all(servers.splice(0).map((server) => server.stop()));
+  });
+
+  it('loads relay options from env and verbose flags', () => {
+    process.env.RELAY_HOST = '0.0.0.0';
+    process.env.RELAY_PATH = '/relay';
+    process.env.RELAY_PORT = 'nope';
+    process.env.RELAY_LOG = 'verbose';
+    process.env.REMOTE_COPILOT_SHARED_SECRET = ' secret ';
+    process.argv = [...originalArgv, '--verbose'];
+
+    expect(loadRelayServerOptions()).toEqual({
+      host: '0.0.0.0',
+      path: '/relay',
+      port: 8787,
+      sharedSecret: 'secret',
+      verbose: true
+    });
+  });
+
+  it('starts a relay server with helper defaults', async () => {
+    const server = await startRelayServer({ port: 8803 });
+    servers.push(server);
+
+    expect(server).toBeInstanceOf(RelayServer);
+    expect(server.address).toBe('ws://127.0.0.1:8803/');
   });
 
   it('registers clients and routes prompt streams', async () => {
@@ -413,5 +453,201 @@ describe('RelayServer', () => {
 
     expect(status.code).toBe('unsupported_message');
     vscode.close();
+  });
+
+  it('rejects messages sent before registration and closes the socket', async () => {
+    const server = new RelayServer({ port: 8799 });
+    servers.push(server);
+    await server.start();
+
+    const socket = await createSocket(server.address);
+    const closePromise = waitForClose(socket);
+
+    socket.send(
+      JSON.stringify({
+        type: 'ping',
+        timestamp: '2026-03-10T00:00:00.000Z'
+      })
+    );
+
+    const status = await nextMessage(socket);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('unsupported_message');
+    await closePromise;
+  });
+
+  it('reports repeated cancel requests after the first cancellation is forwarded', async () => {
+    const server = new RelayServer({ port: 8800 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    const vscode = await createSocket(server.address);
+
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    const requestId = createRequestId();
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId,
+        mode: 'ask',
+        prompt: 'Start'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_cancel',
+        clientId: 'workspace-1',
+        requestId
+      })
+    );
+
+    const firstStatus = await nextMessage(discord);
+    expect(firstStatus.type).toBe('relay_status');
+    if (firstStatus.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${firstStatus.type}`);
+    }
+
+    expect(firstStatus.message).toContain('Cancellation requested');
+    expect((await nextMessage(vscode)).type).toBe('copilot_cancel');
+
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_cancel',
+        clientId: 'workspace-1',
+        requestId
+      })
+    );
+
+    const secondStatus = await nextMessage(discord);
+    expect(secondStatus.type).toBe('relay_status');
+    if (secondStatus.type !== 'relay_status') {
+      throw new Error(
+        `Expected relay_status but received ${secondStatus.type}`
+      );
+    }
+
+    expect(secondStatus.message).toContain('Cancellation already requested');
+
+    discord.close();
+    vscode.close();
+  });
+
+  it('warns the old client when a newer client registers with the same id', async () => {
+    const server = new RelayServer({ port: 8801 });
+    servers.push(server);
+    await server.start();
+
+    const firstDiscord = await createSocket(server.address);
+    const secondDiscord = await createSocket(server.address);
+
+    firstDiscord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(firstDiscord)).type).toBe('register_ack');
+
+    const closePromise = waitForClose(firstDiscord);
+    secondDiscord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+
+    const warning = await nextMessage(firstDiscord);
+    expect(warning.type).toBe('relay_status');
+    if (warning.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${warning.type}`);
+    }
+
+    expect(warning.code).toBe('client_disconnected');
+    expect(warning.message).toContain('Connection replaced');
+    expect((await nextMessage(secondDiscord)).type).toBe('register_ack');
+    await closePromise;
+
+    secondDiscord.close();
+  });
+
+  it('notifies discord when the vscode client disconnects during a pending request', async () => {
+    const server = new RelayServer({ port: 8802 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    const vscode = await createSocket(server.address);
+
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    const requestId = createRequestId();
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId,
+        mode: 'ask',
+        prompt: 'Start'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+    vscode.close();
+
+    const status = await nextMessage(discord);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('target_not_connected');
+    expect(status.message).toContain(
+      'disconnected before completing the request'
+    );
+
+    discord.close();
   });
 });

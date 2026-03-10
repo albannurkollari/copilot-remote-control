@@ -817,12 +817,23 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
 };
 
 export const __testing = {
+  APPROVAL_TIMEOUT_MS,
   DEFAULT_APPROVAL_TTL_MS,
+  BufferedReply,
+  DISCORD_CANCEL_REASON,
   createApprovalCustomId,
   createApprovalScopeKey,
   createPromptCustomId,
+  createPromptActionComponents,
   formatApprovalTtlLabel,
+  formatDuration,
   formatPermissionRequest,
+  isDiscordApiError,
   parseApprovalCustomId,
-  parsePromptCustomId
+  parsePromptCustomId,
+  sendEphemeralResponse,
+  takePendingApproval,
+  takePendingPrompt,
+  toErrorMessage,
+  truncateText
 };
