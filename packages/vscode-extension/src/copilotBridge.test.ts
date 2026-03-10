@@ -35,13 +35,11 @@ describe('copilot bridge tool execution helpers', () => {
     expect(
       __testing.toToolExecutionPlan('edit_file', {
         filePath: 'src/index.ts',
-        summary: 'Update entrypoint',
         content: 'console.log("hi")\n'
       })
     ).toEqual({
       kind: 'edit_file',
       filePath: 'src/index.ts',
-      summary: 'Update entrypoint',
       content: 'console.log("hi")\n'
     });
   });
@@ -59,10 +57,38 @@ describe('copilot bridge tool execution helpers', () => {
     });
   });
 
-  it('summarizes command results safely', () => {
-    expect(__testing.stringifyToolResult(undefined)).toContain(
-      'without a return value'
+  it('uses the minimal execution result payload', () => {
+    expect(__testing.createExecutionResult()).toBe('ok');
+  });
+
+  it('renders a compact Copilot prompt', () => {
+    expect(
+      __testing.renderPromptText({
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-1',
+        mode: 'plan',
+        prompt: 'Add tests',
+        userDisplayName: 'alice'
+      })
+    ).toBe('Reply with a brief plan.\nCtx:alice@default\nAdd tests');
+  });
+
+  it('keeps tool descriptions short', () => {
+    expect(__testing.remoteTools.map((tool) => tool.description)).toEqual([
+      'Run a terminal command after approval.',
+      'Write a workspace file after approval.',
+      'Run a VS Code command after approval.'
+    ]);
+  });
+
+  it('uses short mode instructions', () => {
+    expect(__testing.createModeInstruction('ask')).toBe('Reply briefly.');
+    expect(__testing.createModeInstruction('plan')).toBe(
+      'Reply with a brief plan.'
     );
-    expect(__testing.stringifyToolResult({ ok: true })).toContain('"ok": true');
+    expect(__testing.createModeInstruction('agent')).toBe(
+      'Act and reply briefly.'
+    );
   });
 });

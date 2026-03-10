@@ -26,7 +26,6 @@ type FileEditExecution = {
   content: string;
   filePath: string;
   kind: 'edit_file';
-  summary: string;
 };
 
 type VsCodeCommandExecution = {
@@ -50,27 +49,29 @@ const isNonEmptyString = (value: unknown): value is string => {
   return typeof value === 'string' && value.trim().length > 0;
 };
 
-const stringifyToolResult = (value: unknown) => {
-  if (value === undefined) {
-    return 'Command completed without a return value.';
-  }
+const MINIMAL_TOOL_RESULT = 'ok';
 
-  if (typeof value === 'string') {
-    return value;
-  }
+const createExecutionResult = () => {
+  return MINIMAL_TOOL_RESULT;
+};
 
-  try {
-    const serialized = JSON.stringify(value, null, 2);
-    if (!serialized) {
-      return String(value);
-    }
-
-    return serialized.length > 1_500
-      ? `${serialized.slice(0, 1_480)}\n…truncated`
-      : serialized;
-  } catch {
-    return String(value);
+const createModeInstruction = (mode: CopilotPromptMessage['mode']) => {
+  switch (mode) {
+    case 'ask':
+      return 'Reply briefly.';
+    case 'plan':
+      return 'Reply with a brief plan.';
+    case 'agent':
+      return 'Act and reply briefly.';
   }
+};
+
+const renderPromptText = (message: CopilotPromptMessage) => {
+  return [
+    createModeInstruction(message.mode),
+    `Ctx:${message.userDisplayName ?? 'unknown'}@${message.clientId}`,
+    message.prompt
+  ].join('\n');
 };
 
 const normalizeWorkspaceRelativePath = (filePath: string) => {
@@ -128,10 +129,6 @@ const toToolExecutionPlan = (name: string, input: object): ToolExecutionPlan => 
       throw new Error('edit_file requires a non-empty filePath.');
     }
 
-    if (!isNonEmptyString(data.summary)) {
-      throw new Error('edit_file requires a non-empty summary.');
-    }
-
     if (!isNonEmptyString(data.content)) {
       throw new Error('edit_file requires a non-empty content string.');
     }
@@ -139,7 +136,6 @@ const toToolExecutionPlan = (name: string, input: object): ToolExecutionPlan => 
     return {
       kind: 'edit_file',
       filePath: data.filePath.trim(),
-      summary: data.summary.trim(),
       content: data.content
     };
   }
@@ -162,14 +158,13 @@ const toToolExecutionPlan = (name: string, input: object): ToolExecutionPlan => 
 const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
   {
     name: 'run_terminal_command',
-    description:
-      'Request approval before running a terminal command in the local workspace.',
+    description: 'Run a terminal command after approval.',
     inputSchema: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: 'Terminal command the model wants to run.'
+          description: 'Shell command.'
         }
       },
       required: ['command']
@@ -177,39 +172,35 @@ const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
   },
   {
     name: 'edit_file',
-    description: 'Request approval before editing a workspace file.',
+    description: 'Write a workspace file after approval.',
     inputSchema: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
-          description: 'Workspace-relative file path to edit.'
-        },
-        summary: {
-          type: 'string',
-          description: 'Short description of the intended file change.'
+          description: 'Workspace path.'
         },
         content: {
           type: 'string',
-          description: 'Complete replacement content to write to the target file.'
+          description: 'Full file content.'
         }
       },
-      required: ['filePath', 'summary', 'content']
+      required: ['filePath', 'content']
     }
   },
   {
     name: 'execute_tool',
-    description: 'Request approval before invoking another developer tool.',
+    description: 'Run a VS Code command after approval.',
     inputSchema: {
       type: 'object',
       properties: {
         toolName: {
           type: 'string',
-          description: 'VS Code command or developer tool identifier to invoke.'
+          description: 'Command id.'
         },
         input: {
           type: 'object',
-          description: 'Optional command payload. Use {"args": [...]} to pass positional arguments.'
+          description: 'Optional args.'
         }
       },
       required: ['toolName']
@@ -401,10 +392,7 @@ export class CopilotBridge {
         terminal.show(false);
         terminal.sendText(plan.command, true);
 
-        return [
-          'Approved by the remote operator and executed locally.',
-          `Started terminal command in ${REMOTE_COPILOT_TERMINAL_NAME}: ${plan.command}`
-        ].join('\n');
+        return createExecutionResult();
       }
 
       case 'edit_file': {
@@ -415,24 +403,13 @@ export class CopilotBridge {
           new TextEncoder().encode(plan.content)
         );
 
-        return [
-          'Approved by the remote operator and executed locally.',
-          `Updated workspace file ${plan.filePath}.`,
-          `Summary: ${plan.summary}`
-        ].join('\n');
+        return createExecutionResult();
       }
 
       case 'execute_tool': {
-        const result = await vscode.commands.executeCommand(
-          plan.commandId,
-          ...plan.args
-        );
+        await vscode.commands.executeCommand(plan.commandId, ...plan.args);
 
-        return [
-          'Approved by the remote operator and executed locally.',
-          `Executed VS Code command ${plan.commandId}.`,
-          `Result: ${stringifyToolResult(result)}`
-        ].join('\n');
+        return createExecutionResult();
       }
     }
   }
@@ -501,25 +478,7 @@ export class CopilotBridge {
   }
 
   #renderPrompt(message: CopilotPromptMessage) {
-    const modeInstruction = (() => {
-      switch (message.mode) {
-        case 'ask':
-          return 'Answer the request directly and concisely.';
-        case 'plan':
-          return 'Produce an implementation plan with practical steps, risks, and validation guidance.';
-        case 'agent':
-          return 'Reason step-by-step like an autonomous coding assistant, but only return the response text.';
-      }
-    })();
-
-    return [
-      modeInstruction,
-      `Remote user: ${message.userDisplayName ?? 'unknown'}`,
-      `Workspace client: ${message.clientId}`,
-      '',
-      'User prompt:',
-      message.prompt
-    ].join('\n');
+    return renderPromptText(message);
   }
 
   #toPermissionRequest(
@@ -653,8 +612,11 @@ export class CopilotBridge {
 }
 
 export const __testing = {
+  createExecutionResult,
+  createModeInstruction,
+  remoteTools: REMOTE_TOOLS,
   normalizeWorkspaceRelativePath,
-  stringifyToolResult,
+  renderPromptText,
   toCommandArgs,
   toToolExecutionPlan
 };
