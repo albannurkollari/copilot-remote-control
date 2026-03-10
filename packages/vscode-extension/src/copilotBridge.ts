@@ -3,6 +3,7 @@ import {
   type PermissionAction,
   type PermissionRequestMessage
 } from '@remote-copilot/shared';
+import path from 'node:path';
 import * as vscode from 'vscode';
 
 export interface PermissionRequester {
@@ -15,6 +16,148 @@ export interface RunPromptHandlers {
   onText: (chunk: string) => void | Promise<void>;
   requestPermission: PermissionRequester;
 }
+
+type TerminalCommandExecution = {
+  command: string;
+  kind: 'run_terminal_command';
+};
+
+type FileEditExecution = {
+  content: string;
+  filePath: string;
+  kind: 'edit_file';
+  summary: string;
+};
+
+type VsCodeCommandExecution = {
+  args: unknown[];
+  commandId: string;
+  kind: 'execute_tool';
+};
+
+type ToolExecutionPlan =
+  | TerminalCommandExecution
+  | FileEditExecution
+  | VsCodeCommandExecution;
+
+const REMOTE_COPILOT_TERMINAL_NAME = 'Remote Copilot';
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null;
+};
+
+const isNonEmptyString = (value: unknown): value is string => {
+  return typeof value === 'string' && value.trim().length > 0;
+};
+
+const stringifyToolResult = (value: unknown) => {
+  if (value === undefined) {
+    return 'Command completed without a return value.';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    if (!serialized) {
+      return String(value);
+    }
+
+    return serialized.length > 1_500
+      ? `${serialized.slice(0, 1_480)}\n…truncated`
+      : serialized;
+  } catch {
+    return String(value);
+  }
+};
+
+const normalizeWorkspaceRelativePath = (filePath: string) => {
+  const trimmed = filePath.trim();
+  if (trimmed.length === 0) {
+    throw new Error('File path must not be empty.');
+  }
+
+  const normalized = path.posix.normalize(
+    trimmed.replace(/\\/g, '/').replace(/^\/+/g, '')
+  );
+
+  if (
+    normalized.length === 0 ||
+    normalized === '.' ||
+    normalized.startsWith('../') ||
+    path.posix.isAbsolute(normalized)
+  ) {
+    throw new Error(
+      `File path must stay within the current workspace: ${filePath}`
+    );
+  }
+
+  return normalized;
+};
+
+const toCommandArgs = (input: unknown) => {
+  if (!isRecord(input)) {
+    return input === undefined ? [] : [input];
+  }
+
+  if (Array.isArray(input.args)) {
+    return [...input.args];
+  }
+
+  return Object.keys(input).length === 0 ? [] : [input];
+};
+
+const toToolExecutionPlan = (name: string, input: object): ToolExecutionPlan => {
+  const data = input as Record<string, unknown>;
+
+  if (name === 'run_terminal_command') {
+    if (!isNonEmptyString(data.command)) {
+      throw new Error('run_terminal_command requires a non-empty command.');
+    }
+
+    return {
+      kind: 'run_terminal_command',
+      command: data.command.trim()
+    };
+  }
+
+  if (name === 'edit_file') {
+    if (!isNonEmptyString(data.filePath)) {
+      throw new Error('edit_file requires a non-empty filePath.');
+    }
+
+    if (!isNonEmptyString(data.summary)) {
+      throw new Error('edit_file requires a non-empty summary.');
+    }
+
+    if (!isNonEmptyString(data.content)) {
+      throw new Error('edit_file requires a non-empty content string.');
+    }
+
+    return {
+      kind: 'edit_file',
+      filePath: data.filePath.trim(),
+      summary: data.summary.trim(),
+      content: data.content
+    };
+  }
+
+  if (name === 'execute_tool') {
+    if (!isNonEmptyString(data.toolName)) {
+      throw new Error('execute_tool requires a non-empty toolName.');
+    }
+
+    return {
+      kind: 'execute_tool',
+      commandId: data.toolName.trim(),
+      args: toCommandArgs(data.input)
+    };
+  }
+
+  throw new Error(`Unsupported tool call: ${name}`);
+};
 
 const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
   {
@@ -45,9 +188,13 @@ const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
         summary: {
           type: 'string',
           description: 'Short description of the intended file change.'
+        },
+        content: {
+          type: 'string',
+          description: 'Complete replacement content to write to the target file.'
         }
       },
-      required: ['filePath', 'summary']
+      required: ['filePath', 'summary', 'content']
     }
   },
   {
@@ -58,11 +205,11 @@ const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
       properties: {
         toolName: {
           type: 'string',
-          description: 'Developer tool name to invoke.'
+          description: 'VS Code command or developer tool identifier to invoke.'
         },
         input: {
           type: 'object',
-          description: 'Tool input payload.'
+          description: 'Optional command payload. Use {"args": [...]} to pass positional arguments.'
         }
       },
       required: ['toolName']
@@ -80,6 +227,7 @@ export class CopilotBridge {
     }
   >();
   #outputChannel: vscode.OutputChannel;
+  #terminal?: vscode.Terminal;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -213,12 +361,14 @@ export class CopilotBridge {
           );
         }
 
+        const executionResult = await this.#executeApprovedToolCall(part);
+
         conversation.push(api.LanguageModelChatMessage.Assistant([part]));
         conversation.push(
           api.LanguageModelChatMessage.User([
             new api.LanguageModelToolResultPart(part.callId, [
               new api.LanguageModelTextPart(
-                'Approved by the remote operator. Continue by describing the intended action and any manual steps instead of executing side effects automatically.'
+                executionResult
               )
             ])
           ])
@@ -240,6 +390,101 @@ export class CopilotBridge {
         return;
       }
     }
+  }
+
+  async #executeApprovedToolCall(part: vscode.LanguageModelToolCallPart) {
+    const plan = toToolExecutionPlan(part.name, part.input);
+
+    switch (plan.kind) {
+      case 'run_terminal_command': {
+        const terminal = this.#getOrCreateTerminal();
+        terminal.show(false);
+        terminal.sendText(plan.command, true);
+
+        return [
+          'Approved by the remote operator and executed locally.',
+          `Started terminal command in ${REMOTE_COPILOT_TERMINAL_NAME}: ${plan.command}`
+        ].join('\n');
+      }
+
+      case 'edit_file': {
+        const fileUri = await this.#resolveWorkspaceFileUri(plan.filePath);
+        await this.#ensureParentDirectory(fileUri);
+        await vscode.workspace.fs.writeFile(
+          fileUri,
+          new TextEncoder().encode(plan.content)
+        );
+
+        return [
+          'Approved by the remote operator and executed locally.',
+          `Updated workspace file ${plan.filePath}.`,
+          `Summary: ${plan.summary}`
+        ].join('\n');
+      }
+
+      case 'execute_tool': {
+        const result = await vscode.commands.executeCommand(
+          plan.commandId,
+          ...plan.args
+        );
+
+        return [
+          'Approved by the remote operator and executed locally.',
+          `Executed VS Code command ${plan.commandId}.`,
+          `Result: ${stringifyToolResult(result)}`
+        ].join('\n');
+      }
+    }
+  }
+
+  #getOrCreateTerminal() {
+    if (this.#terminal && this.#terminal.exitStatus === undefined) {
+      return this.#terminal;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    this.#terminal = vscode.window.createTerminal({
+      cwd: workspaceFolder?.uri,
+      name: REMOTE_COPILOT_TERMINAL_NAME
+    });
+
+    return this.#terminal;
+  }
+
+  async #resolveWorkspaceFileUri(filePath: string) {
+    const normalizedPath = normalizeWorkspaceRelativePath(filePath);
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
+    if (!workspaceFolder) {
+      throw new Error(
+        'No workspace folder is open, so Remote Copilot cannot edit workspace files.'
+      );
+    }
+
+    return vscode.Uri.joinPath(
+      workspaceFolder.uri,
+      ...normalizedPath.split('/')
+    );
+  }
+
+  async #ensureParentDirectory(fileUri: vscode.Uri) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const relativePath = normalizeWorkspaceRelativePath(
+      vscode.workspace.asRelativePath(fileUri, false)
+    );
+    const parentPath = path.posix.dirname(relativePath);
+
+    if (parentPath === '.' || parentPath.length === 0) {
+      return;
+    }
+
+    await vscode.workspace.fs.createDirectory(
+      vscode.Uri.joinPath(workspaceFolder.uri, ...parentPath.split('/'))
+    );
   }
 
   async #selectModel() {
@@ -406,3 +651,10 @@ export class CopilotBridge {
     return String(error);
   }
 }
+
+export const __testing = {
+  normalizeWorkspaceRelativePath,
+  stringifyToolResult,
+  toCommandArgs,
+  toToolExecutionPlan
+};
