@@ -1,10 +1,88 @@
 import { vi } from 'vitest';
 
-vi.mock('vscode', () => ({}));
+const mockVscode = vi.hoisted(() => {
+  const selectChatModels = vi.fn();
 
-import { __testing } from './copilotBridge.ts';
+  class CancellationTokenSource {
+    token = { isCancellationRequested: false };
+
+    cancel() {
+      this.token.isCancellationRequested = true;
+    }
+
+    dispose() {}
+  }
+
+  class LanguageModelTextPart {
+    value: string;
+
+    constructor(value: string) {
+      this.value = value;
+    }
+  }
+
+  class LanguageModelToolCallPart {}
+  class LanguageModelToolResultPart {}
+  class LanguageModelError extends Error {}
+
+  const LanguageModelChatMessage = {
+    Assistant: (content: unknown) => ({ role: 'assistant', content }),
+    User: (content: unknown) => ({ role: 'user', content })
+  };
+
+  return {
+    CancellationTokenSource,
+    LanguageModelChatMessage,
+    LanguageModelError,
+    LanguageModelTextPart,
+    LanguageModelToolCallPart,
+    LanguageModelToolResultPart,
+    lm: { selectChatModels },
+    selectChatModels,
+    window: {
+      createTerminal: vi.fn(() => ({
+        exitStatus: undefined,
+        sendText: vi.fn(),
+        show: vi.fn()
+      }))
+    },
+    workspace: {
+      asRelativePath: vi.fn(),
+      fs: {
+        createDirectory: vi.fn(),
+        writeFile: vi.fn()
+      },
+      workspaceFolders: []
+    },
+    commands: {
+      executeCommand: vi.fn()
+    },
+    Uri: {
+      joinPath: vi.fn()
+    }
+  };
+});
+
+vi.mock('vscode', () => mockVscode);
+
+import { __testing, CopilotBridge } from './copilotBridge.ts';
+
+const toAsyncIterable = <T>(values: T[]) => {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const value of values) {
+        yield value;
+      }
+    }
+  };
+};
 
 describe('copilot bridge tool execution helpers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVscode.selectChatModels.mockReset();
+  });
+
   it('normalizes safe workspace-relative paths', () => {
     expect(__testing.normalizeWorkspaceRelativePath('src\\index.ts')).toBe(
       'src/index.ts'
@@ -90,5 +168,95 @@ describe('copilot bridge tool execution helpers', () => {
     expect(__testing.createModeInstruction('agent')).toBe(
       'Act and reply briefly.'
     );
+  });
+
+  it('reuses shared conversation across prompts', async () => {
+    const capturedConversations: unknown[] = [];
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi
+        .fn()
+        .mockImplementationOnce(async (messages: unknown) => {
+          capturedConversations.push(JSON.parse(JSON.stringify(messages)));
+          return {
+            stream: toAsyncIterable([
+              new mockVscode.LanguageModelTextPart('First reply')
+            ]),
+            text: toAsyncIterable([])
+          };
+        })
+        .mockImplementationOnce(async (messages: unknown) => {
+          capturedConversations.push(JSON.parse(JSON.stringify(messages)));
+          return {
+            stream: toAsyncIterable([
+              new mockVscode.LanguageModelTextPart('Second reply')
+            ]),
+            text: toAsyncIterable([])
+          };
+        })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'First prompt',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn()
+      }
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-2',
+        mode: 'ask',
+        prompt: 'Second prompt',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn()
+      }
+    );
+
+    expect(model.sendRequest).toHaveBeenCalledTimes(2);
+    expect(capturedConversations[0]).toEqual([
+      {
+        role: 'user',
+        content: 'Reply briefly.\nCtx:alice@default\nFirst prompt'
+      }
+    ]);
+    expect(capturedConversations[1]).toEqual([
+      {
+        role: 'user',
+        content: 'Reply briefly.\nCtx:alice@default\nFirst prompt'
+      },
+      {
+        role: 'assistant',
+        content: 'First reply'
+      },
+      {
+        role: 'user',
+        content: 'Reply briefly.\nCtx:alice@default\nSecond prompt'
+      }
+    ]);
   });
 });
