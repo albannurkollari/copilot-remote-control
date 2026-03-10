@@ -7,12 +7,11 @@ import {
   Events,
   GatewayIntentBits,
   MessageFlags,
-  ModalBuilder,
   REST,
   Routes,
-  TextInputBuilder,
-  TextInputStyle,
+  type ButtonInteraction,
   type ChatInputCommandInteraction,
+  type InteractionReplyOptions,
   type Message
 } from 'discord.js';
 import pc from 'picocolors';
@@ -29,7 +28,6 @@ import {
 } from './relayClient.ts';
 
 export interface DiscordBotConfig extends RelayDiscordClientOptions {
-  approvalPassphrase?: string;
   approvalTtlMs?: number;
   applicationId: string;
   guildId: string;
@@ -53,10 +51,8 @@ const DISCORD_LABEL = pc.bold(pc.cyan('Discord:'));
 const COPILOT_LABEL = pc.bold(pc.magenta('Copilot:'));
 const CHAT_LABEL = pc.bold(pc.green('Chat:'));
 const APPROVAL_CUSTOM_ID_PREFIX = 'remoteCopilot:permission';
-const APPROVAL_MODAL_ID_PREFIX = 'remoteCopilot:passphrase';
-const APPROVAL_PASSPHRASE_INPUT_ID = 'approvalPassphrase';
 const APPROVAL_TIMEOUT_MS = 120_000;
-const DEFAULT_APPROVAL_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_APPROVAL_TTL_MS = 30 * 60 * 1000;
 
 interface ApprovalDecision {
   approved: boolean;
@@ -75,15 +71,13 @@ interface ApprovalGrant {
   expiresAt: number;
 }
 
+type ApprovalAction = 'approve' | 'approve_ttl' | 'deny';
+
 const createApprovalCustomId = (
   permissionId: string,
-  action: 'approve' | 'approve_session' | 'approve_ttl' | 'deny'
+  action: ApprovalAction
 ) => {
   return `${APPROVAL_CUSTOM_ID_PREFIX}:${action}:${permissionId}`;
-};
-
-const createApprovalModalId = (permissionId: string) => {
-  return `${APPROVAL_MODAL_ID_PREFIX}:${permissionId}`;
 };
 
 const parseApprovalCustomId = (customId: string) => {
@@ -93,10 +87,7 @@ const parseApprovalCustomId = (customId: string) => {
 
   const [, , action, permissionId] = customId.split(':');
   if (
-    (action !== 'approve' &&
-      action !== 'approve_session' &&
-      action !== 'approve_ttl' &&
-      action !== 'deny') ||
+    (action !== 'approve' && action !== 'approve_ttl' && action !== 'deny') ||
     !permissionId ||
     permissionId.trim().length === 0
   ) {
@@ -104,19 +95,6 @@ const parseApprovalCustomId = (customId: string) => {
   }
 
   return { action, permissionId } as const;
-};
-
-const parseApprovalModalId = (customId: string) => {
-  if (!customId.startsWith(`${APPROVAL_MODAL_ID_PREFIX}:`)) {
-    return null;
-  }
-
-  const [, , permissionId] = customId.split(':');
-  if (!permissionId || permissionId.trim().length === 0) {
-    return null;
-  }
-
-  return { permissionId } as const;
 };
 
 const truncateText = (value: string, maxLength: number) => {
@@ -148,6 +126,50 @@ const createApprovalScopeKey = (
   request: PermissionRequestMessage
 ) => {
   return [requesterId, request.clientId, request.action].join(':');
+};
+
+const formatApprovalTtlLabel = (durationMs: number) => {
+  const minutes = Math.max(1, Math.ceil(durationMs / 60_000));
+  return `Allow ${minutes} min${minutes === 1 ? '' : 's'}`;
+};
+
+const toErrorMessage = (error: unknown) => {
+  return error instanceof Error ? error.message : String(error);
+};
+
+const logDiscordError = (context: string, error: unknown) => {
+  process.stderr.write(`[discord-bot] ${context}: ${toErrorMessage(error)}\n`);
+};
+
+const takePendingApproval = (
+  pendingApprovals: Map<string, PendingApproval>,
+  permissionId: string
+) => {
+  const pending = pendingApprovals.get(permissionId);
+  if (!pending) {
+    return undefined;
+  }
+
+  clearTimeout(pending.timeout);
+  pendingApprovals.delete(permissionId);
+  return pending;
+};
+
+const sendEphemeralResponse = async (
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
+  content: string
+) => {
+  const options: InteractionReplyOptions = {
+    content,
+    flags: MessageFlags.Ephemeral
+  };
+
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(options);
+    return;
+  }
+
+  await interaction.reply(options);
 };
 
 const formatDuration = (durationMs: number) => {
@@ -271,7 +293,6 @@ class BufferedReply {
 }
 
 export const loadDiscordBotConfig = (): DiscordBotConfig => {
-  const approvalPassphrase = process.env.DISCORD_APPROVAL_PASSPHRASE?.trim();
   const token = process.env.DISCORD_TOKEN;
   const applicationId = process.env.DISCORD_APPLICATION_ID;
   const guildId = process.env.DISCORD_GUILD_ID;
@@ -298,10 +319,6 @@ export const loadDiscordBotConfig = (): DiscordBotConfig => {
 
   return {
     applicationId,
-    approvalPassphrase:
-      approvalPassphrase && approvalPassphrase.length > 0
-        ? approvalPassphrase
-        : undefined,
     approvalTtlMs: Number.isNaN(approvalTtlMs)
       ? DEFAULT_APPROVAL_TTL_MS
       : approvalTtlMs,
@@ -405,7 +422,6 @@ export const handleCopilotInteraction = async (
 
 export const createDiscordBot = (config: DiscordBotConfig) => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-  const sessionApprovalGrants = new Set<string>();
   const approvalGrants = new Map<string, ApprovalGrant>();
   const pendingApprovals = new Map<string, PendingApproval>();
   const relayClient = new RelayDiscordClient({
@@ -433,19 +449,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
     interaction: ChatInputCommandInteraction,
     request: PermissionRequestMessage
   ) => {
-    const scopeKey = createApprovalScopeKey(interaction.user.id, request);
-    if (sessionApprovalGrants.has(scopeKey)) {
-      logOverlay(
-        COPILOT_LABEL,
-        `Session-approved ${request.title} for ${interaction.user.username}`
-      );
-      return {
-        approved: true,
-        reason: 'Approved from Discord for this bot session.'
-      };
-    }
-
-    const cacheKey = scopeKey;
+    const cacheKey = createApprovalScopeKey(interaction.user.id, request);
     const cachedGrant = getApprovalGrant(cacheKey);
 
     if (cachedGrant) {
@@ -467,17 +471,12 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId(
-            createApprovalCustomId(request.permissionId, 'approve_session')
-          )
-          .setLabel('Allow session')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(!config.approvalPassphrase),
-        new ButtonBuilder()
-          .setCustomId(
             createApprovalCustomId(request.permissionId, 'approve_ttl')
           )
           .setLabel(
-            `Approve ${formatDuration(config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)}`
+            formatApprovalTtlLabel(
+              config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS
+            )
           )
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
@@ -495,7 +494,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
 
     return await new Promise<ApprovalDecision>((resolve) => {
       const timeout = setTimeout(() => {
-        pendingApprovals.delete(request.permissionId);
+        takePendingApproval(pendingApprovals, request.permissionId);
         void approvalMessage.edit({
           content: `${formatPermissionRequest(request)}\n\nDecision: Timed out`,
           components: []
@@ -524,147 +523,73 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
-      const parsed = parseApprovalCustomId(interaction.customId);
-      if (!parsed) {
-        return;
-      }
-
-      const pending = pendingApprovals.get(parsed.permissionId);
-      if (!pending) {
-        await interaction.reply({
-          content: 'This permission request is no longer active.',
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      if (interaction.user.id !== pending.requesterId) {
-        await interaction.reply({
-          content:
-            'Only the original requester can approve or deny this action.',
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      if (parsed.action === 'approve_session') {
-        if (!config.approvalPassphrase) {
-          await interaction.reply({
-            content: 'Session authorization is not configured for this bot.',
-            flags: MessageFlags.Ephemeral
-          });
+      try {
+        const parsed = parseApprovalCustomId(interaction.customId);
+        if (!parsed) {
           return;
         }
 
-        await interaction.showModal(
-          new ModalBuilder()
-            .setCustomId(createApprovalModalId(parsed.permissionId))
-            .setTitle('Allow session')
-            .addComponents(
-              new ActionRowBuilder<TextInputBuilder>().addComponents(
-                new TextInputBuilder()
-                  .setCustomId(APPROVAL_PASSPHRASE_INPUT_ID)
-                  .setLabel('Passphrase')
-                  .setRequired(true)
-                  .setStyle(TextInputStyle.Short)
-              )
-            )
+        const pending = pendingApprovals.get(parsed.permissionId);
+        if (!pending) {
+          await sendEphemeralResponse(
+            interaction,
+            'This permission request is no longer active.'
+          );
+          return;
+        }
+
+        if (interaction.user.id !== pending.requesterId) {
+          await sendEphemeralResponse(
+            interaction,
+            'Only the original requester can approve or deny this action.'
+          );
+          return;
+        }
+
+        const activePending = takePendingApproval(
+          pendingApprovals,
+          parsed.permissionId
         );
-        return;
-      }
+        if (!activePending) {
+          await sendEphemeralResponse(
+            interaction,
+            'This permission request is no longer active.'
+          );
+          return;
+        }
 
-      clearTimeout(pending.timeout);
-      pendingApprovals.delete(parsed.permissionId);
+        const approved =
+          parsed.action === 'approve' || parsed.action === 'approve_ttl';
+        if (parsed.action === 'approve_ttl') {
+          const cacheKey = createApprovalScopeKey(
+            interaction.user.id,
+            activePending.request
+          );
+          approvalGrants.set(cacheKey, {
+            expiresAt:
+              Date.now() + (config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)
+          });
+        }
 
-      const approved =
-        parsed.action === 'approve' || parsed.action === 'approve_ttl';
-      if (parsed.action === 'approve_ttl') {
-        const cacheKey = createApprovalScopeKey(
-          interaction.user.id,
-          pending.request
-        );
-        approvalGrants.set(cacheKey, {
-          expiresAt:
-            Date.now() + (config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)
+        const reason = approved
+          ? parsed.action === 'approve_ttl'
+            ? `Approved from Discord for ${formatDuration(config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)}.`
+            : 'Approved from Discord.'
+          : 'Denied from Discord.';
+
+        activePending.resolve({ approved, reason });
+
+        await interaction.update({
+          content: `${formatPermissionRequest(activePending.request)}\n\nDecision: ${approved ? reason : 'Denied'}`,
+          components: []
         });
+      } catch (error) {
+        logDiscordError('button interaction failed', error);
+        await sendEphemeralResponse(
+          interaction,
+          `Error: ${toErrorMessage(error)}`
+        ).catch(() => undefined);
       }
-
-      const reason = approved
-        ? parsed.action === 'approve_ttl'
-          ? `Approved from Discord for ${formatDuration(config.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS)}.`
-          : 'Approved from Discord.'
-        : 'Denied from Discord.';
-
-      await interaction.update({
-        content: `${formatPermissionRequest(pending.request)}\n\nDecision: ${approved ? reason : 'Denied'}`,
-        components: []
-      });
-
-      pending.resolve({ approved, reason });
-      return;
-    }
-
-    if (interaction.isModalSubmit()) {
-      const parsed = parseApprovalModalId(interaction.customId);
-      if (!parsed) {
-        return;
-      }
-
-      const pending = pendingApprovals.get(parsed.permissionId);
-      if (!pending) {
-        await interaction.reply({
-          content: 'This permission request is no longer active.',
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      if (interaction.user.id !== pending.requesterId) {
-        await interaction.reply({
-          content: 'Only the original requester can authorize this session.',
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      const submittedPassphrase = interaction.fields.getTextInputValue(
-        APPROVAL_PASSPHRASE_INPUT_ID
-      );
-
-      if (
-        !config.approvalPassphrase ||
-        submittedPassphrase !== config.approvalPassphrase
-      ) {
-        await interaction.reply({
-          content: 'Invalid passphrase.',
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-
-      clearTimeout(pending.timeout);
-      pendingApprovals.delete(parsed.permissionId);
-
-      const scopeKey = createApprovalScopeKey(
-        interaction.user.id,
-        pending.request
-      );
-      sessionApprovalGrants.add(scopeKey);
-
-      await pending.message.edit({
-        content: `${formatPermissionRequest(pending.request)}\n\nDecision: Approved for this bot session`,
-        components: []
-      });
-      await interaction.reply({
-        content:
-          'Session authorization granted. Matching requests will now auto-approve for this bot session.',
-        flags: MessageFlags.Ephemeral
-      });
-
-      pending.resolve({
-        approved: true,
-        reason: 'Approved from Discord for this bot session.'
-      });
       return;
     }
 
@@ -708,7 +633,6 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
       await client.login(config.token);
     },
     async stop() {
-      sessionApprovalGrants.clear();
       for (const pending of pendingApprovals.values()) {
         clearTimeout(pending.timeout);
         pending.resolve({
@@ -721,4 +645,13 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
       client.destroy();
     }
   };
+};
+
+export const __testing = {
+  DEFAULT_APPROVAL_TTL_MS,
+  createApprovalCustomId,
+  createApprovalScopeKey,
+  formatApprovalTtlLabel,
+  formatPermissionRequest,
+  parseApprovalCustomId
 };

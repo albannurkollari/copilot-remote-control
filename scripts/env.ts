@@ -28,7 +28,6 @@ export const REMOTE_COPILOT_REQUIRED_KEYS = [
 export const ENV_PRESETS: Record<EnvMode, EnvValues> = {
   dev: {
     APP_ENV: 'dev',
-    DISCORD_APPROVAL_PASSPHRASE: '',
     DISCORD_APPLICATION_ID: '',
     DISCORD_GUILD_ID: '',
     DISCORD_STREAM_UPDATE_MS: '1200',
@@ -46,7 +45,6 @@ export const ENV_PRESETS: Record<EnvMode, EnvValues> = {
   },
   prod: {
     APP_ENV: 'prod',
-    DISCORD_APPROVAL_PASSPHRASE: '',
     DISCORD_APPLICATION_ID: '',
     DISCORD_GUILD_ID: '',
     DISCORD_STREAM_UPDATE_MS: '1200',
@@ -87,7 +85,6 @@ const REMOTE_COPILOT_ENV_TEMPLATE = [
   'DISCORD_APPLICATION_ID={{DISCORD_APPLICATION_ID}}',
   'DISCORD_GUILD_ID={{DISCORD_GUILD_ID}}',
   'DISCORD_STREAM_UPDATE_MS={{DISCORD_STREAM_UPDATE_MS}}',
-  'DISCORD_APPROVAL_PASSPHRASE={{DISCORD_APPROVAL_PASSPHRASE}}',
   'REMOTE_COPILOT_CLIENT_ID={{REMOTE_COPILOT_CLIENT_ID}}',
   '',
   '# =============================================================================',
@@ -180,7 +177,6 @@ export const mergeRemoteCopilotEnvValues = (
   merged.VSCODE_REMOTE_COPILOT_RELAY_URL = merged.RELAY_URL;
   merged.VSCODE_REMOTE_COPILOT_SHARED_SECRET =
     merged.REMOTE_COPILOT_SHARED_SECRET;
-  merged.DISCORD_APPROVAL_PASSPHRASE = merged.DISCORD_APPROVAL_PASSPHRASE || '';
 
   return merged;
 };

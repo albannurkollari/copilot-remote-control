@@ -89,11 +89,6 @@ const PROMPT_FIELDS: PromptField[] = [
     key: 'RELAY_URL',
     description: 'Relay URL used by the Discord bot and VS Code extension',
     defaultValue: (values) => buildRelayUrl(values)
-  },
-  {
-    key: 'DISCORD_APPROVAL_PASSPHRASE',
-    description: 'Optional passphrase for session approvals',
-    optional: true
   }
 ];
 
