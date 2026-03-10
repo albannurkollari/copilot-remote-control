@@ -380,6 +380,78 @@ describe('RelayDiscordClient', () => {
     expect(sockets.length).toBeGreaterThan(1);
   });
 
+  it('rejects when the relay closes before registration completes', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+
+    socket.emit('close');
+
+    await expect(connecting).rejects.toThrow(
+      'Relay connection closed before registration completed.'
+    );
+  });
+
+  it('ignores duplicate terminal connection failures after the promise has settled', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+
+    socket.emit('error', new Error('boom'));
+    socket.emit('close');
+
+    await expect(connecting).rejects.toThrow('boom');
+  });
+
+  it('throws when prompts or cancels are attempted after the socket has closed', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    socket.readyState = 3;
+    vi.spyOn(client, 'connect').mockResolvedValue(undefined);
+
+    await expect(
+      client.sendPrompt({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'Explain'
+      })
+    ).rejects.toThrow('Relay connection is not available.');
+
+    await expect(client.cancelPrompt('req-1')).rejects.toThrow(
+      'Relay connection is not available.'
+    );
+  });
+
   it('emits status events without request ids and does not reconnect after manual disconnect', async () => {
     const client = new RelayDiscordClient({
       clientId: 'discord-bot',

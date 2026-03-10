@@ -41,6 +41,69 @@ describe('protocol helpers', () => {
     expect(result.ok ? '' : result.error).toContain('Unsupported');
   });
 
+  it('rejects non-object payloads and invalid required fields', () => {
+    expect(parseRelayMessage(null)).toEqual({
+      ok: false,
+      error: 'Message must be an object with a string type.'
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'register',
+        clientId: 'workspace-1',
+        clientRole: 'vscode',
+        sharedSecret: ''
+      })
+    ).toEqual({
+      ok: false,
+      error:
+        'Register messages require clientRole, clientId, and an optional non-empty sharedSecret.'
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'other',
+        prompt: 'Hello'
+      })
+    ).toEqual({
+      ok: false,
+      error:
+        'Copilot prompt messages require clientId, requestId, mode, and prompt.'
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        action: 'invalid',
+        title: 'Edit file'
+      })
+    ).toEqual({
+      ok: false,
+      error:
+        'Permission request messages require clientId, requestId, permissionId, action, and title.'
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        approved: 'yes'
+      })
+    ).toEqual({
+      ok: false,
+      error:
+        'Permission response messages require clientId, requestId, permissionId, and approved.'
+    });
+  });
+
   it('creates stable request and permission identifiers', () => {
     expect(createRequestId()).toMatch(/^req_/u);
     expect(createPermissionId()).toMatch(/^perm_/u);
@@ -123,6 +186,127 @@ describe('protocol helpers', () => {
       expect(result.ok).toBe(true);
       expect(result.ok && result.value).toEqual(message);
     }
+  });
+
+  it('preserves optional fields when present and omits invalid optional values', () => {
+    expect(
+      parseRelayMessage({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'Hello',
+        userDisplayName: 'alice',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-1'
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'Hello',
+        userDisplayName: 'alice',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-1'
+      }
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'relay_status',
+        code: 'request_failed',
+        level: 'warning',
+        message: 'Failed',
+        requestId: 1,
+        clientId: 2,
+        targetClientRole: 3
+      })
+    ).toEqual({
+      ok: false,
+      error: 'Relay status requestId must be a non-empty string.'
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        action: 'edit_file',
+        title: 'Edit file'
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        action: 'edit_file',
+        title: 'Edit file',
+        details: undefined,
+        command: undefined
+      }
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        approved: false
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        approved: false,
+        reason: undefined
+      }
+    });
+  });
+
+  it('accepts the authorization status code and rejects invalid stream payloads', () => {
+    expect(
+      parseRelayMessage({
+        type: 'relay_status',
+        code: 'authorization_required',
+        level: 'error',
+        message: 'Need a secret.'
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: 'relay_status',
+        code: 'authorization_required',
+        level: 'error',
+        message: 'Need a secret.',
+        requestId: undefined,
+        clientId: undefined,
+        targetClientRole: undefined
+      }
+    });
+
+    expect(
+      parseRelayMessage({
+        type: 'copilot_stream',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        done: 'nope'
+      })
+    ).toEqual({
+      ok: false,
+      error: 'Copilot stream messages require clientId, requestId, and done.'
+    });
   });
 
   it('rejects invalid fields for supported message types', () => {

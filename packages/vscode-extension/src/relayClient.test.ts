@@ -111,6 +111,39 @@ describe('VscodeRelayClient', () => {
     expect(client.isReady).toBe(true);
   });
 
+  it('reuses the same socket while a connection is already in flight or open', async () => {
+    const client = new VscodeRelayClient({
+      clientId: 'workspace-1',
+      outputChannel,
+      sharedSecret: 'secret',
+      url: 'ws://relay.test'
+    });
+
+    void client.connect();
+    expect(sockets).toHaveLength(1);
+
+    await client.connect();
+    expect(sockets).toHaveLength(1);
+
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'vscode',
+          clientId: 'workspace-1',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+
+    await client.connect();
+    expect(sockets).toHaveLength(1);
+  });
+
   it('throws when waiting for readiness before connecting', async () => {
     const client = new VscodeRelayClient({
       clientId: 'workspace-1',
@@ -598,6 +631,72 @@ describe('VscodeRelayClient', () => {
 
     expect(outputChannel.appendLine).not.toHaveBeenCalledWith(
       expect.stringContaining('Ignoring malformed relay payload')
+    );
+  });
+
+  it('ignores unrelated permission responses without disturbing pending ones', async () => {
+    const client = new VscodeRelayClient({
+      clientId: 'workspace-1',
+      outputChannel,
+      sharedSecret: 'secret',
+      url: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'vscode',
+          clientId: 'workspace-1',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    const permissionPromise = client.requestPermission({
+      type: 'permission_request',
+      action: 'edit_file',
+      clientId: 'workspace-1',
+      permissionId: 'perm-1',
+      requestId: 'req-1',
+      title: 'Edit file'
+    });
+    await Promise.resolve();
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'permission_response',
+          approved: true,
+          clientId: 'workspace-1',
+          permissionId: 'perm-other',
+          requestId: 'req-other'
+        })
+      )
+    );
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'permission_response',
+          approved: true,
+          clientId: 'workspace-1',
+          permissionId: 'perm-1',
+          requestId: 'req-1'
+        })
+      )
+    );
+
+    await expect(permissionPromise).resolves.toEqual(
+      expect.objectContaining({ approved: true, permissionId: 'perm-1' })
     );
   });
 
