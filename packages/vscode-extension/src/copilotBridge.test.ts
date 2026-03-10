@@ -1,3 +1,12 @@
+import {
+  createModeInstruction,
+  DEFAULT_MAX_SESSION_MESSAGES,
+  normalizeMaxSessionMessages,
+  normalizeWorkspaceRelativePath,
+  renderPromptText,
+  toToolExecutionPlan,
+  trimConversation
+} from '@remote-copilot/shared';
 import { vi } from 'vitest';
 
 const mockVscode = vi.hoisted(() => {
@@ -84,23 +93,23 @@ describe('copilot bridge tool execution helpers', () => {
   });
 
   it('normalizes safe workspace-relative paths', () => {
-    expect(__testing.normalizeWorkspaceRelativePath('src\\index.ts')).toBe(
+    expect(normalizeWorkspaceRelativePath('src\\index.ts')).toBe(
       'src/index.ts'
     );
-    expect(__testing.normalizeWorkspaceRelativePath('/nested/file.ts')).toBe(
+    expect(normalizeWorkspaceRelativePath('/nested/file.ts')).toBe(
       'nested/file.ts'
     );
   });
 
   it('rejects paths that escape the workspace', () => {
-    expect(() =>
-      __testing.normalizeWorkspaceRelativePath('../secret.txt')
-    ).toThrow(/within the current workspace/);
+    expect(() => normalizeWorkspaceRelativePath('../secret.txt')).toThrow(
+      /within the current workspace/
+    );
   });
 
   it('builds a terminal command execution plan', () => {
     expect(
-      __testing.toToolExecutionPlan('run_terminal_command', {
+      toToolExecutionPlan('run_terminal_command', {
         command: 'pnpm test'
       })
     ).toEqual({
@@ -111,7 +120,7 @@ describe('copilot bridge tool execution helpers', () => {
 
   it('requires concrete file content for file edits', () => {
     expect(
-      __testing.toToolExecutionPlan('edit_file', {
+      toToolExecutionPlan('edit_file', {
         filePath: 'src/index.ts',
         content: 'console.log("hi")\n'
       })
@@ -124,7 +133,7 @@ describe('copilot bridge tool execution helpers', () => {
 
   it('maps command payload args for execute_tool', () => {
     expect(
-      __testing.toToolExecutionPlan('execute_tool', {
+      toToolExecutionPlan('execute_tool', {
         toolName: 'workbench.action.files.save',
         input: { args: ['a', 2] }
       })
@@ -141,7 +150,7 @@ describe('copilot bridge tool execution helpers', () => {
 
   it('renders a compact Copilot prompt', () => {
     expect(
-      __testing.renderPromptText({
+      renderPromptText({
         type: 'copilot_prompt',
         clientId: 'default',
         requestId: 'req-1',
@@ -161,26 +170,20 @@ describe('copilot bridge tool execution helpers', () => {
   });
 
   it('uses short mode instructions', () => {
-    expect(__testing.createModeInstruction('ask')).toBe('Reply briefly.');
-    expect(__testing.createModeInstruction('plan')).toBe(
-      'Reply with a brief plan.'
-    );
-    expect(__testing.createModeInstruction('agent')).toBe(
-      'Act and reply briefly.'
-    );
+    expect(createModeInstruction('ask')).toBe('Reply briefly.');
+    expect(createModeInstruction('plan')).toBe('Reply with a brief plan.');
+    expect(createModeInstruction('agent')).toBe('Act and reply briefly.');
   });
 
   it('normalizes max retained session messages', () => {
-    expect(__testing.normalizeMaxSessionMessages()).toBe(
-      __testing.DEFAULT_MAX_SESSION_MESSAGES
-    );
-    expect(__testing.normalizeMaxSessionMessages(0)).toBe(1);
-    expect(__testing.normalizeMaxSessionMessages(5.8)).toBe(5);
+    expect(normalizeMaxSessionMessages()).toBe(DEFAULT_MAX_SESSION_MESSAGES);
+    expect(normalizeMaxSessionMessages(0)).toBe(1);
+    expect(normalizeMaxSessionMessages(5.8)).toBe(5);
   });
 
   it('trims retained conversation to the newest messages', () => {
-    expect(__testing.trimConversation([1, 2, 3, 4], 2)).toEqual([3, 4]);
-    expect(__testing.trimConversation([1, 2], 4)).toEqual([1, 2]);
+    expect(trimConversation([1, 2, 3, 4], 2)).toEqual([3, 4]);
+    expect(trimConversation([1, 2], 4)).toEqual([1, 2]);
   });
 
   it('reuses shared conversation across prompts', async () => {

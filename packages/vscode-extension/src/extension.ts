@@ -1,6 +1,6 @@
 import {
-    type CopilotPromptMessage,
-    type PermissionRequestMessage
+  type CopilotPromptMessage,
+  type PermissionRequestMessage
 } from '@remote-copilot/shared';
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
