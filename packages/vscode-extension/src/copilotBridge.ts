@@ -110,7 +110,10 @@ const toCommandArgs = (input: unknown) => {
   return Object.keys(input).length === 0 ? [] : [input];
 };
 
-const toToolExecutionPlan = (name: string, input: object): ToolExecutionPlan => {
+const toToolExecutionPlan = (
+  name: string,
+  input: object
+): ToolExecutionPlan => {
   const data = input as Record<string, unknown>;
 
   if (name === 'run_terminal_command') {
@@ -358,9 +361,7 @@ export class CopilotBridge {
         conversation.push(
           api.LanguageModelChatMessage.User([
             new api.LanguageModelToolResultPart(part.callId, [
-              new api.LanguageModelTextPart(
-                executionResult
-              )
+              new api.LanguageModelTextPart(executionResult)
             ])
           ])
         );
