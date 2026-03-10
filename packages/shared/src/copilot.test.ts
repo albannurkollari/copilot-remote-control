@@ -59,6 +59,9 @@ describe('copilot shared helpers', () => {
     expect(() => normalizeWorkspaceRelativePath('../secret.txt')).toThrow(
       /within the current workspace/
     );
+    expect(() => normalizeWorkspaceRelativePath('   ')).toThrow(
+      /File path must not be empty/
+    );
   });
 
   it('maps command payload args', () => {

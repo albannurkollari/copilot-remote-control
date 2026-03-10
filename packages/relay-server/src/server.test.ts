@@ -301,4 +301,117 @@ describe('RelayServer', () => {
     discord.close();
     vscode.close();
   });
+
+  it('routes permission requests to discord and responses back to vscode', async () => {
+    const server = new RelayServer({ port: 8797 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    const vscode = await createSocket(server.address);
+
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'Start'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        action: 'edit_file',
+        title: 'Edit file'
+      })
+    );
+
+    const forwardedRequest = await nextMessage(discord);
+    expect(forwardedRequest.type).toBe('permission_request');
+
+    discord.send(
+      JSON.stringify({
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        approved: true
+      })
+    );
+
+    const forwardedResponse = await nextMessage(vscode);
+    expect(forwardedResponse.type).toBe('permission_response');
+
+    discord.close();
+    vscode.close();
+  });
+
+  it('responds to ping with pong and rejects unsupported message directions', async () => {
+    const server = new RelayServer({ port: 8798 });
+    servers.push(server);
+    await server.start();
+
+    const vscode = await createSocket(server.address);
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'ping',
+        timestamp: '2026-03-10T00:00:00.000Z'
+      })
+    );
+
+    const pong = await nextMessage(vscode);
+    expect(pong.type).toBe('pong');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'nope'
+      })
+    );
+
+    const status = await nextMessage(vscode);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('unsupported_message');
+    vscode.close();
+  });
 });

@@ -28,6 +28,13 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          name: 'copilot-rc',
+          root: 'packages/copilot-rc'
+        }
+      },
+      {
+        extends: true,
+        test: {
           name: '@remote-copilot/shared',
           root: 'packages/shared'
         }
@@ -65,6 +72,7 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.test.ts',
         '**/src/index.ts',
+        '**/src/main.ts',
         '**/tsup.config.ts',
         'vitest.config.ts'
       ],

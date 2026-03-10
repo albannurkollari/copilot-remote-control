@@ -1,4 +1,8 @@
-import { __testing, loadDiscordBotConfig } from './bot.ts';
+import {
+  __testing,
+  handleCopilotInteraction,
+  loadDiscordBotConfig
+} from './bot.ts';
 
 describe('discord bot approval helpers', () => {
   it('uses a 30 minute approval cache by default', () => {
@@ -60,6 +64,20 @@ describe('discord bot approval helpers', () => {
     expect(text).toContain('Details: ');
     expect(text).toContain('…');
   });
+
+  it('formats approval scope keys and singular ttl labels', () => {
+    expect(
+      __testing.createApprovalScopeKey('user-1', {
+        type: 'permission_request',
+        action: 'edit_file',
+        clientId: 'workspace-1',
+        permissionId: 'perm-1',
+        requestId: 'req-1',
+        title: 'Edit file'
+      })
+    ).toBe('user-1:workspace-1:edit_file');
+    expect(__testing.formatApprovalTtlLabel(60_000)).toBe('Allow 1 min');
+  });
 });
 
 describe('loadDiscordBotConfig', () => {
@@ -81,5 +99,152 @@ describe('loadDiscordBotConfig', () => {
     const config = loadDiscordBotConfig();
 
     expect(config.approvalTtlMs).toBe(30 * 60 * 1000);
+  });
+
+  it('throws when required configuration is missing', () => {
+    process.env = {};
+
+    expect(() => loadDiscordBotConfig()).toThrow(
+      /Missing required Discord bot configuration/
+    );
+  });
+
+  it('uses fallback ttl and custom update interval values', () => {
+    process.env.DISCORD_TOKEN = 'token';
+    process.env.DISCORD_APPLICATION_ID = 'app';
+    process.env.DISCORD_GUILD_ID = 'guild';
+    process.env.RELAY_URL = 'ws://127.0.0.1:8787/';
+    process.env.REMOTE_COPILOT_CLIENT_ID = 'default';
+    process.env.REMOTE_COPILOT_SHARED_SECRET = ' secret ';
+    process.env.DISCORD_APPROVAL_TTL_MS = 'nope';
+    process.env.DISCORD_STREAM_UPDATE_MS = '250';
+
+    const config = loadDiscordBotConfig();
+
+    expect(config.approvalTtlMs).toBe(30 * 60 * 1000);
+    expect(config.sharedSecret).toBe('secret');
+    expect(config.updateIntervalMs).toBe(250);
+  });
+});
+
+describe('handleCopilotInteraction', () => {
+  it('streams replies, resolves permissions, and unregisters prompts', async () => {
+    const interaction = {
+      channel: { isThread: () => false },
+      channelId: 'channel-1',
+      deferred: false,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      followUp: vi.fn().mockResolvedValue(undefined),
+      id: 'message-1',
+      options: {
+        getString: vi.fn((name: string) => {
+          return name === 'mode' ? 'ask' : 'Explain this';
+        })
+      },
+      replied: false,
+      user: {
+        globalName: 'Alice',
+        id: 'user-1',
+        username: 'alice'
+      },
+      deferReply: vi.fn().mockResolvedValue(undefined)
+    } as any;
+    const relayClient = {
+      cancelPrompt: vi.fn().mockResolvedValue(true),
+      respondToPermissionRequest: vi.fn(),
+      sendPrompt: vi.fn(async (_message, handlers) => {
+        await handlers.onPermissionRequest?.({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-1',
+          requestId: 'req-1',
+          title: 'Edit file'
+        });
+        await handlers.onStatus?.({
+          type: 'relay_status',
+          code: 'client_connected',
+          level: 'warning',
+          message: 'warn'
+        });
+        await handlers.onStream?.({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId: 'req-1',
+          delta: 'Hello',
+          done: false
+        });
+      })
+    } as any;
+    const registerPendingPrompt = vi.fn();
+    const unregisterPendingPrompt = vi.fn();
+
+    await handleCopilotInteraction(
+      interaction,
+      relayClient,
+      { targetClientId: 'workspace-1', updateIntervalMs: 1 },
+      vi.fn().mockResolvedValue({ approved: true }),
+      {
+        cancelPendingApprovals: vi.fn(),
+        registerPendingPrompt,
+        unregisterPendingPrompt
+      }
+    );
+
+    expect(interaction.deferReply).toHaveBeenCalled();
+    expect(relayClient.sendPrompt).toHaveBeenCalled();
+    expect(relayClient.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-1' }),
+      true,
+      undefined
+    );
+    expect(registerPendingPrompt).toHaveBeenCalled();
+    expect(unregisterPendingPrompt).toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Hello') })
+    );
+  });
+
+  it('reports relay failures in the buffered reply', async () => {
+    const interaction = {
+      channel: { isThread: () => false },
+      channelId: 'channel-1',
+      deferred: false,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      followUp: vi.fn().mockResolvedValue(undefined),
+      id: 'message-1',
+      options: {
+        getString: vi.fn((name: string) => {
+          return name === 'mode' ? 'ask' : 'Explain this';
+        })
+      },
+      replied: false,
+      user: {
+        globalName: 'Alice',
+        id: 'user-1',
+        username: 'alice'
+      },
+      deferReply: vi.fn().mockResolvedValue(undefined)
+    } as any;
+
+    await handleCopilotInteraction(
+      interaction,
+      {
+        sendPrompt: vi.fn().mockRejectedValue(new Error('boom'))
+      } as any,
+      { targetClientId: 'workspace-1', updateIntervalMs: 1 },
+      vi.fn(),
+      {
+        cancelPendingApprovals: vi.fn(),
+        registerPendingPrompt: vi.fn(),
+        unregisterPendingPrompt: vi.fn()
+      }
+    );
+
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Error: boom')
+      })
+    );
   });
 });
