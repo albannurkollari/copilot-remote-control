@@ -1,5 +1,20 @@
 Repository Purpose
 
+First Principle
+
+The first and foremost principle in this repository is:
+
+- minimum bare consumption of tokens for both input and output
+
+Guidance:
+
+- Never add extra wording, explanation, framing, or prompt padding around user input before sending it to GitHub Copilot.
+- Keep all Copilot-facing prompts, tool schemas, tool results, and follow-up messages as short as possible.
+- Prefer concise outputs from Copilot.
+- If structure, formatting, labels, status text, or presentation can be added after the model responds, do that in the VS Code extension or other local helper code instead of asking the LLM to generate it.
+- Do not spend tokens on text that can be deterministically produced by the application.
+- Treat new context creation and unnecessary conversation history growth as costly; minimize both whenever possible.
+
 This repository implements a system for remotely interacting with GitHub Copilot Chat through Discord.
 
 The architecture consists of:

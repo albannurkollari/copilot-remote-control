@@ -15,9 +15,9 @@ describe('copilot bridge tool execution helpers', () => {
   });
 
   it('rejects paths that escape the workspace', () => {
-    expect(() => __testing.normalizeWorkspaceRelativePath('../secret.txt')).toThrow(
-      /within the current workspace/
-    );
+    expect(() =>
+      __testing.normalizeWorkspaceRelativePath('../secret.txt')
+    ).toThrow(/within the current workspace/);
   });
 
   it('builds a terminal command execution plan', () => {
