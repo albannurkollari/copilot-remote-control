@@ -1,6 +1,7 @@
 import {
   parseRelayMessage,
   serializeRelayMessage,
+  type CopilotCancelMessage,
   type CopilotPromptMessage,
   type CopilotStreamMessage,
   type PermissionRequestMessage,
@@ -27,6 +28,8 @@ export interface PromptRequestHandlers {
 }
 
 interface PendingPromptRequest extends PromptRequestHandlers {
+  clientId: string;
+  cancelRequested?: boolean;
   reject: (error: Error) => void;
   resolve: () => void;
 }
@@ -172,11 +175,36 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
     return await new Promise<void>((resolve, reject) => {
       this.#pendingRequests.set(message.requestId, {
         ...handlers,
+        clientId: message.clientId,
         reject,
         resolve
       });
       this.#socket?.send(serializeRelayMessage(message));
     });
+  }
+
+  async cancelPrompt(requestId: string) {
+    await this.connect();
+
+    if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
+      throw new Error('Relay connection is not available.');
+    }
+
+    const pending = this.#pendingRequests.get(requestId);
+    if (!pending) {
+      return false;
+    }
+
+    pending.cancelRequested = true;
+
+    const message: CopilotCancelMessage = {
+      type: 'copilot_cancel',
+      clientId: pending.clientId,
+      requestId
+    };
+
+    this.#socket.send(serializeRelayMessage(message));
+    return true;
   }
 
   respondToPermissionRequest(

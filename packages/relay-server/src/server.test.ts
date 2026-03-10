@@ -227,4 +227,76 @@ describe('RelayServer', () => {
     expect(ack.type).toBe('register_ack');
     discord.close();
   });
+
+  it('forwards cancel requests to the target vscode client', async () => {
+    const server = new RelayServer({ port: 8796 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    const vscode = await createSocket(server.address);
+
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    const requestId = createRequestId();
+    const forwardedPromptPromise = nextMessage(vscode);
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId,
+        mode: 'ask',
+        prompt: 'Start a long task'
+      })
+    );
+
+    expect((await forwardedPromptPromise).type).toBe('copilot_prompt');
+
+    const cancelStatusPromise = nextMessage(discord);
+    const cancelForwardedPromise = nextMessage(vscode);
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_cancel',
+        clientId: 'workspace-1',
+        requestId
+      })
+    );
+
+    const cancelStatus = await cancelStatusPromise;
+    expect(cancelStatus.type).toBe('relay_status');
+    if (cancelStatus.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${cancelStatus.type}`);
+    }
+
+    expect(cancelStatus.code).toBe('request_cancelled');
+
+    const cancelForwarded = await cancelForwardedPromise;
+    expect(cancelForwarded.type).toBe('copilot_cancel');
+    if (cancelForwarded.type !== 'copilot_cancel') {
+      throw new Error(
+        `Expected copilot_cancel but received ${cancelForwarded.type}`
+      );
+    }
+
+    expect(cancelForwarded.requestId).toBe(requestId);
+
+    discord.close();
+    vscode.close();
+  });
 });

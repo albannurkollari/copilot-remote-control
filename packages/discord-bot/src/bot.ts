@@ -1,30 +1,30 @@
 import { type PermissionRequestMessage } from '@remote-copilot/shared';
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  Client,
-  Events,
-  GatewayIntentBits,
-  MessageFlags,
-  REST,
-  Routes,
-  type ButtonInteraction,
-  type ChatInputCommandInteraction,
-  type InteractionReplyOptions,
-  type Message
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    Client,
+    Events,
+    GatewayIntentBits,
+    MessageFlags,
+    REST,
+    Routes,
+    type ButtonInteraction,
+    type ChatInputCommandInteraction,
+    type InteractionReplyOptions,
+    type Message
 } from 'discord.js';
 import pc from 'picocolors';
 
 import {
-  buildCopilotPromptMessage,
-  COPILOT_COMMAND_NAME,
-  createCopilotCommand,
-  parseCopilotCommand
+    buildCopilotPromptMessage,
+    COPILOT_COMMAND_NAME,
+    createCopilotCommand,
+    parseCopilotCommand
 } from './commands/copilot.ts';
 import {
-  RelayDiscordClient,
-  type RelayDiscordClientOptions
+    RelayDiscordClient,
+    type RelayDiscordClientOptions
 } from './relayClient.ts';
 
 export interface DiscordBotConfig extends RelayDiscordClientOptions {
@@ -51,8 +51,10 @@ const DISCORD_LABEL = pc.bold(pc.cyan('Discord:'));
 const COPILOT_LABEL = pc.bold(pc.magenta('Copilot:'));
 const CHAT_LABEL = pc.bold(pc.green('Chat:'));
 const APPROVAL_CUSTOM_ID_PREFIX = 'remoteCopilot:permission';
+const PROMPT_CUSTOM_ID_PREFIX = 'remoteCopilot:prompt';
 const APPROVAL_TIMEOUT_MS = 120_000;
 const DEFAULT_APPROVAL_TTL_MS = 30 * 60 * 1000;
+const DISCORD_CANCEL_REASON = 'Cancelled from Discord.';
 
 interface ApprovalDecision {
   approved: boolean;
@@ -71,7 +73,13 @@ interface ApprovalGrant {
   expiresAt: number;
 }
 
+interface PendingPrompt {
+  cancel: () => Promise<void>;
+  requesterId: string;
+}
+
 type ApprovalAction = 'approve' | 'approve_ttl' | 'deny';
+type PromptAction = 'cancel';
 
 const createApprovalCustomId = (
   permissionId: string,
@@ -95,6 +103,23 @@ const parseApprovalCustomId = (customId: string) => {
   }
 
   return { action, permissionId } as const;
+};
+
+const createPromptCustomId = (requestId: string, action: PromptAction) => {
+  return `${PROMPT_CUSTOM_ID_PREFIX}:${action}:${requestId}`;
+};
+
+const parsePromptCustomId = (customId: string) => {
+  if (!customId.startsWith(`${PROMPT_CUSTOM_ID_PREFIX}:`)) {
+    return null;
+  }
+
+  const [, , action, requestId] = customId.split(':');
+  if (action !== 'cancel' || !requestId || requestId.trim().length === 0) {
+    return null;
+  }
+
+  return { action, requestId } as const;
 };
 
 const truncateText = (value: string, maxLength: number) => {
@@ -188,8 +213,33 @@ const formatDuration = (durationMs: number) => {
   return `${minutes}m ${seconds}s`;
 };
 
+const createPromptActionComponents = (requestId: string) => {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(createPromptCustomId(requestId, 'cancel'))
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+};
+
+const takePendingPrompt = (
+  pendingPrompts: Map<string, PendingPrompt>,
+  requestId: string
+) => {
+  const pending = pendingPrompts.get(requestId);
+  if (!pending) {
+    return undefined;
+  }
+
+  pendingPrompts.delete(requestId);
+  return pending;
+};
+
 class BufferedReply {
   #buffer = '';
+  #components: ActionRowBuilder<ButtonBuilder>[] = [];
   #dirty = false;
   #finalized = false;
   #flushTimer?: NodeJS.Timeout;
@@ -220,7 +270,10 @@ class BufferedReply {
       }
     }
 
-    await this.interaction.editReply('Processing…');
+    await this.interaction.editReply({
+      content: 'Processing…',
+      components: this.#components
+    });
   }
 
   append(text: string) {
@@ -237,6 +290,20 @@ class BufferedReply {
     this.#notes.push(note);
     this.#dirty = true;
     this.#scheduleFlush();
+  }
+
+  setComponents(components: ActionRowBuilder<ButtonBuilder>[]) {
+    this.#components = components;
+    this.#dirty = true;
+  }
+
+  clearComponents() {
+    this.#components = [];
+    this.#dirty = true;
+  }
+
+  async flushNow() {
+    await this.#flush(true);
   }
 
   async fail(message: string) {
@@ -288,7 +355,10 @@ class BufferedReply {
         ? `${content.slice(0, 1_930)}\n\n…truncated`
         : content;
 
-    await this.interaction.editReply(safeContent);
+    await this.interaction.editReply({
+      content: safeContent,
+      components: this.#components
+    });
   }
 }
 
@@ -354,17 +424,16 @@ export const handleCopilotInteraction = async (
   requestPermissionApproval: (
     interaction: ChatInputCommandInteraction,
     request: PermissionRequestMessage
-  ) => Promise<ApprovalDecision>
+  ) => Promise<ApprovalDecision>,
+  options: {
+    cancelPendingApprovals: (requestId: string, reason: string) => void;
+    registerPendingPrompt: (pending: PendingPrompt & { requestId: string }) => void;
+    unregisterPendingPrompt: (requestId: string) => void;
+  }
 ) => {
   const input = parseCopilotCommand(interaction);
   logOverlay(DISCORD_LABEL, `${interaction.user.username} -> ${input.mode}`);
   logOverlay(CHAT_LABEL, input.prompt);
-
-  const reply = new BufferedReply(
-    interaction,
-    config.updateIntervalMs ?? 1_200
-  );
-  await reply.start();
 
   const promptMessage = buildCopilotPromptMessage(input, {
     clientId: config.targetClientId,
@@ -376,14 +445,43 @@ export const handleCopilotInteraction = async (
     userDisplayName: interaction.user.globalName ?? interaction.user.username
   });
 
+  const reply = new BufferedReply(
+    interaction,
+    config.updateIntervalMs ?? 1_200
+  );
+  reply.setComponents(createPromptActionComponents(promptMessage.requestId));
+  await reply.start();
+
   try {
     let replyLogged = false;
+
+    options.registerPendingPrompt({
+      requestId: promptMessage.requestId,
+      requesterId: interaction.user.id,
+      cancel: async () => {
+        options.cancelPendingApprovals(
+          promptMessage.requestId,
+          DISCORD_CANCEL_REASON
+        );
+        reply.addNote('Cancellation requested.');
+        reply.clearComponents();
+        await reply.flushNow();
+
+        const cancelled = await relayClient.cancelPrompt(promptMessage.requestId);
+        if (!cancelled) {
+          throw new Error('This request is no longer active.');
+        }
+      }
+    });
 
     await relayClient.sendPrompt(promptMessage, {
       onPermissionRequest: async (message) => {
         const decision = await requestPermissionApproval(interaction, message);
 
-        if (!decision.approved) {
+        if (
+          !decision.approved &&
+          decision.reason !== DISCORD_CANCEL_REASON
+        ) {
           reply.addNote(`Permission request denied: ${message.title}`);
         }
 
@@ -414,9 +512,13 @@ export const handleCopilotInteraction = async (
       }
     });
 
+    reply.clearComponents();
     await reply.finish();
   } catch (error) {
+    reply.clearComponents();
     await reply.fail(error instanceof Error ? error.message : String(error));
+  } finally {
+    options.unregisterPendingPrompt(promptMessage.requestId);
   }
 };
 
@@ -424,6 +526,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const approvalGrants = new Map<string, ApprovalGrant>();
   const pendingApprovals = new Map<string, PendingApproval>();
+  const pendingPrompts = new Map<string, PendingPrompt>();
   const relayClient = new RelayDiscordClient({
     clientId: config.clientId,
     relayUrl: config.relayUrl,
@@ -515,6 +618,25 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
     });
   };
 
+  const cancelPendingApprovals = (requestId: string, reason: string) => {
+    for (const [permissionId, pending] of pendingApprovals.entries()) {
+      if (pending.request.requestId !== requestId) {
+        continue;
+      }
+
+      const activePending = takePendingApproval(pendingApprovals, permissionId);
+      if (!activePending) {
+        continue;
+      }
+
+      activePending.resolve({ approved: false, reason });
+      void activePending.message.edit({
+        content: `${formatPermissionRequest(activePending.request)}\n\nDecision: Cancelled`,
+        components: []
+      });
+    }
+  };
+
   client.once(Events.ClientReady, async () => {
     await registerGuildCommands(config);
     await relayClient.connect();
@@ -524,6 +646,42 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       try {
+        const promptAction = parsePromptCustomId(interaction.customId);
+        if (promptAction) {
+          const pendingPrompt = pendingPrompts.get(promptAction.requestId);
+          if (!pendingPrompt) {
+            await sendEphemeralResponse(
+              interaction,
+              'This Copilot request is no longer active.'
+            );
+            return;
+          }
+
+          if (interaction.user.id !== pendingPrompt.requesterId) {
+            await sendEphemeralResponse(
+              interaction,
+              'Only the original requester can cancel this action.'
+            );
+            return;
+          }
+
+          const activePrompt = takePendingPrompt(
+            pendingPrompts,
+            promptAction.requestId
+          );
+          if (!activePrompt) {
+            await sendEphemeralResponse(
+              interaction,
+              'This Copilot request is no longer active.'
+            );
+            return;
+          }
+
+          await interaction.deferUpdate();
+          await activePrompt.cancel();
+          return;
+        }
+
         const parsed = parseApprovalCustomId(interaction.customId);
         if (!parsed) {
           return;
@@ -604,7 +762,16 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
       interaction,
       relayClient,
       config,
-      requestPermissionApproval
+      requestPermissionApproval,
+      {
+        cancelPendingApprovals,
+        registerPendingPrompt: ({ requestId, ...pending }) => {
+          pendingPrompts.set(requestId, pending);
+        },
+        unregisterPendingPrompt: (requestId) => {
+          pendingPrompts.delete(requestId);
+        }
+      }
     ).catch(async (error) => {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Discord interaction failed: ${message}\n`);
@@ -641,6 +808,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
         });
       }
       pendingApprovals.clear();
+      pendingPrompts.clear();
       await relayClient.disconnect();
       client.destroy();
     }
@@ -651,7 +819,9 @@ export const __testing = {
   DEFAULT_APPROVAL_TTL_MS,
   createApprovalCustomId,
   createApprovalScopeKey,
+  createPromptCustomId,
   formatApprovalTtlLabel,
   formatPermissionRequest,
-  parseApprovalCustomId
+  parseApprovalCustomId,
+  parsePromptCustomId
 };

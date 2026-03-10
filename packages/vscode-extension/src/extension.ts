@@ -372,6 +372,17 @@ export async function activate(context: vscode.ExtensionContext) {
     void handlePrompt(message);
   });
 
+  const disposeCancelListener = relayClient.onCancel((message) => {
+    outputChannel.appendLine(
+      `[prompt:${message.requestId}] Cancellation requested by the remote operator.`
+    );
+    bridge.cancelPrompt(message.requestId);
+    relayClient.rejectPendingPermissionRequests(
+      message.requestId,
+      'Request cancelled by remote operator.'
+    );
+  });
+
   const disposeStatusListener = relayClient.onStatus((message) => {
     outputChannel.appendLine(`[relay:${message.level}] ${message.message}`);
   });
@@ -386,6 +397,7 @@ export async function activate(context: vscode.ExtensionContext) {
     relayClient,
     outputChannel,
     { dispose: disposePromptListener },
+    { dispose: disposeCancelListener },
     { dispose: disposeStatusListener },
     { dispose: disposeConnectionProblemListener },
     vscode.commands.registerCommand(

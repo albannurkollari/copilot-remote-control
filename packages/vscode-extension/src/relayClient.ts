@@ -1,4 +1,5 @@
 import {
+  type CopilotCancelMessage,
   parseRelayMessage,
   serializeRelayMessage,
   type CopilotPromptMessage,
@@ -20,6 +21,7 @@ export interface VscodeRelayClientOptions {
 }
 
 type PromptListener = (message: CopilotPromptMessage) => void | Promise<void>;
+type CancelListener = (message: CopilotCancelMessage) => void | Promise<void>;
 type StatusListener = (message: RelayStatusMessage) => void | Promise<void>;
 type ConnectionProblemListener = (message: string) => void | Promise<void>;
 
@@ -35,6 +37,7 @@ export class VscodeRelayClient implements vscode.Disposable {
   readonly sharedSecret: string;
   readonly url: string;
 
+  #cancelListeners = new Set<CancelListener>();
   #outputChannel: vscode.OutputChannel;
   #connectionProblemListeners = new Set<ConnectionProblemListener>();
   #promptListeners = new Set<PromptListener>();
@@ -139,6 +142,13 @@ export class VscodeRelayClient implements vscode.Disposable {
     };
   }
 
+  onCancel(listener: CancelListener) {
+    this.#cancelListeners.add(listener);
+    return () => {
+      this.#cancelListeners.delete(listener);
+    };
+  }
+
   onStatus(listener: StatusListener) {
     this.#statusListeners.add(listener);
     return () => {
@@ -206,6 +216,17 @@ export class VscodeRelayClient implements vscode.Disposable {
     }
   }
 
+  rejectPendingPermissionRequests(requestId: string, reason: string) {
+    for (const [key, pending] of this.#permissionResponses.entries()) {
+      if (!key.startsWith(`${requestId}:`)) {
+        continue;
+      }
+
+      this.#permissionResponses.delete(key);
+      pending.reject(new Error(reason));
+    }
+  }
+
   dispose() {
     void this.disconnect();
   }
@@ -246,6 +267,12 @@ export class VscodeRelayClient implements vscode.Disposable {
 
       case 'copilot_prompt':
         for (const listener of this.#promptListeners) {
+          await listener(parsed.value);
+        }
+        return;
+
+      case 'copilot_cancel':
+        for (const listener of this.#cancelListeners) {
           await listener(parsed.value);
         }
         return;

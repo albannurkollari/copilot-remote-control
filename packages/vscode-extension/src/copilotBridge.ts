@@ -72,6 +72,13 @@ const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
 
 export class CopilotBridge {
   #context: vscode.ExtensionContext;
+  #activePrompts = new Map<
+    string,
+    {
+      cancellationReason?: string;
+      tokenSource: vscode.CancellationTokenSource;
+    }
+  >();
   #outputChannel: vscode.OutputChannel;
 
   constructor(
@@ -120,6 +127,20 @@ export class CopilotBridge {
     }
   }
 
+  cancelPrompt(
+    requestId: string,
+    reason = 'Request cancelled by remote operator.'
+  ) {
+    const activePrompt = this.#activePrompts.get(requestId);
+    if (!activePrompt) {
+      return false;
+    }
+
+    activePrompt.cancellationReason = reason;
+    activePrompt.tokenSource.cancel();
+    return true;
+  }
+
   async runPrompt(message: CopilotPromptMessage, handlers: RunPromptHandlers) {
     const api = this.#getLanguageModelApi();
     const model = await this.#selectModel();
@@ -136,6 +157,7 @@ export class CopilotBridge {
     }
 
     const tokenSource = new api.CancellationTokenSource();
+    this.#activePrompts.set(message.requestId, { tokenSource });
     const conversation = [
       api.LanguageModelChatMessage.User(this.#renderPrompt(message))
     ];
@@ -155,8 +177,9 @@ export class CopilotBridge {
         tokenSource.token
       );
     } catch (error) {
-      throw new Error(this.#toUserFacingError(error));
+      throw new Error(this.#toUserFacingError(error, message.requestId));
     } finally {
+      this.#activePrompts.delete(message.requestId);
       tokenSource.dispose();
     }
   }
@@ -358,7 +381,14 @@ export class CopilotBridge {
     };
   }
 
-  #toUserFacingError(error: unknown) {
+  #toUserFacingError(error: unknown, requestId?: string) {
+    if (requestId) {
+      const activePrompt = this.#activePrompts.get(requestId);
+      if (activePrompt?.tokenSource.token.isCancellationRequested) {
+        return activePrompt.cancellationReason ?? 'Request cancelled.';
+      }
+    }
+
     const languageModelError = (
       vscode as typeof vscode & {
         LanguageModelError?: typeof vscode.LanguageModelError;

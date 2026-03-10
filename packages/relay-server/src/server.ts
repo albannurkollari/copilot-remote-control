@@ -3,6 +3,7 @@ import {
     parseRelayMessage,
     serializeRelayMessage,
     type ClientRole,
+  type CopilotCancelMessage,
     type CopilotPromptMessage,
     type CopilotStreamMessage,
     type PermissionRequestMessage,
@@ -33,6 +34,7 @@ interface RegisteredClient {
 }
 
 interface PendingRequest {
+  cancelRequested?: boolean;
   discordConnectionId: string;
   discordSocket: WebSocket;
   hasLoggedReply: boolean;
@@ -220,6 +222,10 @@ export class RelayServer {
         this.#handlePrompt(registeredClient, parsed.value);
         return;
 
+      case 'copilot_cancel':
+        this.#handleCancel(registeredClient, parsed.value);
+        return;
+
       case 'copilot_stream':
         this.#handleStream(registeredClient, parsed.value);
         return;
@@ -339,6 +345,69 @@ export class RelayServer {
 
     this.#logDiscordPrompt(message);
 
+    this.#send(vscodeClient.socket, message);
+  }
+
+  #handleCancel(client: RegisteredClient, message: CopilotCancelMessage) {
+    if (client.role !== 'discord') {
+      this.#sendStatus(
+        client.socket,
+        'error',
+        'unsupported_message',
+        'Only discord clients can cancel copilot prompts.',
+        { requestId: message.requestId, clientId: message.clientId }
+      );
+      return;
+    }
+
+    const request = this.#requests.get(message.requestId);
+    if (!request) {
+      this.#sendStatus(
+        client.socket,
+        'warning',
+        'request_cancelled',
+        `The request ${message.requestId} is no longer active.`,
+        { requestId: message.requestId, clientId: message.clientId }
+      );
+      return;
+    }
+
+    const vscodeClient = this.#clients.vscode.get(request.targetClientId);
+    if (!vscodeClient) {
+      this.#sendStatus(
+        client.socket,
+        'error',
+        'target_not_connected',
+        `No VS Code client is connected for ${request.targetClientId}.`,
+        {
+          requestId: message.requestId,
+          clientId: request.targetClientId,
+          targetClientRole: 'vscode'
+        }
+      );
+      this.#requests.delete(message.requestId);
+      return;
+    }
+
+    if (request.cancelRequested) {
+      this.#sendStatus(
+        client.socket,
+        'info',
+        'request_cancelled',
+        `Cancellation already requested for ${message.requestId}.`,
+        { requestId: message.requestId, clientId: message.clientId }
+      );
+      return;
+    }
+
+    request.cancelRequested = true;
+    this.#sendStatus(
+      client.socket,
+      'info',
+      'request_cancelled',
+      `Cancellation requested for ${message.requestId}.`,
+      { requestId: message.requestId, clientId: message.clientId }
+    );
     this.#send(vscodeClient.socket, message);
   }
 

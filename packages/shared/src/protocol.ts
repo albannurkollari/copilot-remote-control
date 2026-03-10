@@ -28,6 +28,7 @@ export type RelayMessageType =
   | 'register_ack'
   | 'relay_status'
   | 'copilot_prompt'
+  | 'copilot_cancel'
   | 'copilot_stream'
   | 'permission_request'
   | 'permission_response'
@@ -68,6 +69,12 @@ export interface CopilotPromptMessage {
   channelId?: string;
   threadId?: string;
   messageId?: string;
+}
+
+export interface CopilotCancelMessage {
+  type: 'copilot_cancel';
+  clientId: string;
+  requestId: string;
 }
 
 export interface CopilotStreamMessage {
@@ -115,6 +122,7 @@ export type RelayMessage =
   | RegisterAckMessage
   | RelayStatusMessage
   | CopilotPromptMessage
+  | CopilotCancelMessage
   | CopilotStreamMessage
   | PermissionRequestMessage
   | PermissionResponseMessage
@@ -358,6 +366,26 @@ export const parseRelayMessage = (value: unknown): ParseRelayMessageResult => {
             : undefined,
           threadId: isString(message.threadId) ? message.threadId : undefined,
           messageId: isString(message.messageId) ? message.messageId : undefined
+        }
+      };
+
+    case 'copilot_cancel':
+      if (
+        !isNonEmptyString(message.clientId) ||
+        !isNonEmptyString(message.requestId)
+      ) {
+        return {
+          ok: false,
+          error: 'Copilot cancel messages require clientId and requestId.'
+        };
+      }
+
+      return {
+        ok: true,
+        value: {
+          type: 'copilot_cancel',
+          clientId: message.clientId,
+          requestId: message.requestId
         }
       };
 
