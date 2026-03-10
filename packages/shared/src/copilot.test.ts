@@ -26,6 +26,20 @@ describe('copilot shared helpers', () => {
     );
   });
 
+  it('falls back to an unknown user label when none is provided', () => {
+    const message: CopilotPromptMessage = {
+      type: 'copilot_prompt',
+      clientId: 'default',
+      requestId: 'req-2',
+      mode: 'ask',
+      prompt: 'Hello'
+    };
+
+    expect(renderPromptText(message)).toBe(
+      'Reply briefly.\nCtx:unknown@default\nHello'
+    );
+  });
+
   it('uses short mode instructions', () => {
     expect(createModeInstruction('ask')).toBe('Reply briefly.');
     expect(createModeInstruction('plan')).toBe('Reply with a brief plan.');

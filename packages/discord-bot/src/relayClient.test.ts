@@ -359,6 +359,107 @@ describe('RelayDiscordClient', () => {
     expect(sockets.length).toBeGreaterThan(1);
   });
 
+  it('reuses in-flight connect promises and surfaces registration errors', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const firstConnect = client.connect();
+    const secondConnect = client.connect();
+
+    expect(sockets).toHaveLength(1);
+
+    const socket = latestSocket();
+    socket.emit('error', new Error('boom'));
+
+    await expect(firstConnect).rejects.toThrow('boom');
+    await expect(secondConnect).rejects.toThrow('boom');
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(sockets.length).toBeGreaterThan(1);
+  });
+
+  it('emits status events without request ids and does not reconnect after manual disconnect', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      reconnectDelayMs: 10,
+      relayUrl: 'ws://relay.test'
+    });
+    const onStatus = vi.fn();
+    client.on('status', onStatus);
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'relay_status',
+          code: 'client_connected',
+          level: 'info',
+          message: 'connected'
+        })
+      )
+    );
+
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'connected' })
+    );
+
+    const promptPromise = client.sendPrompt({
+      type: 'copilot_prompt',
+      clientId: 'workspace-1',
+      requestId: 'req-1',
+      mode: 'ask',
+      prompt: 'Explain'
+    });
+    await Promise.resolve();
+
+    const disconnectPromise = client.disconnect();
+    await expect(promptPromise).rejects.toThrow('Relay connection was closed.');
+    await disconnectPromise;
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('throws when responding to permission requests without an active socket', () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    expect(() =>
+      client.respondToPermissionRequest(
+        {
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-1',
+          requestId: 'req-1',
+          title: 'Edit file'
+        },
+        true
+      )
+    ).toThrow('Relay connection is not available.');
+  });
+
   it('disconnects pending requests cleanly', async () => {
     const client = new RelayDiscordClient({
       clientId: 'discord-bot',
