@@ -13,6 +13,9 @@ const registeredCommands = vi.hoisted(
 );
 const bridgeInstances = vi.hoisted(() => [] as any[]);
 const relayInstances = vi.hoisted(() => [] as any[]);
+const relayConnectError = vi.hoisted(() => ({
+  message: null as string | null
+}));
 const transcriptStore = vi.hoisted(() => new Map<string, unknown>());
 
 const mockOutputChannel = vi.hoisted(() => ({
@@ -108,7 +111,11 @@ vi.mock('./copilotBridge.ts', () => ({
 }));
 vi.mock('./relayClient.ts', () => ({
   VscodeRelayClient: class MockRelayClient {
-    connect = vi.fn().mockResolvedValue(undefined);
+    connect = vi.fn().mockImplementation(async () => {
+      if (relayConnectError.message) {
+        throw new Error(relayConnectError.message);
+      }
+    });
     disconnect = vi.fn().mockResolvedValue(undefined);
     reconnect = vi.fn().mockResolvedValue(undefined);
     rejectPendingPermissionRequests = vi.fn();
@@ -155,7 +162,7 @@ vi.mock('./relayClient.ts', () => ({
   }
 }));
 
-import { __testing, activate } from './extension.ts';
+import { __testing, activate, deactivate } from './extension.ts';
 
 const createContext = () => {
   return {
@@ -186,6 +193,7 @@ describe('extension helpers', () => {
     registeredCommands.clear();
     bridgeInstances.length = 0;
     relayInstances.length = 0;
+    relayConnectError.message = null;
     transcriptStore.clear();
     configurationState.clientId = 'default';
     configurationState.maxSessionMessages = 24;
@@ -315,6 +323,7 @@ describe('activate', () => {
     registeredCommands.clear();
     bridgeInstances.length = 0;
     relayInstances.length = 0;
+    relayConnectError.message = null;
     transcriptStore.clear();
     configurationState.clientId = 'default';
     configurationState.maxSessionMessages = 24;
@@ -338,6 +347,9 @@ describe('activate', () => {
 
     await getCommand('remoteCopilot.clearSharedSession')();
     expect(bridgeInstances[0]?.clearSharedConversation).toHaveBeenCalled();
+
+    await getCommand('remoteCopilot.showRelayOutput')();
+    expect(mockOutputChannel.show).toHaveBeenCalledWith(true);
   });
 
   it('shows relay help and skips connecting for invalid configuration', async () => {
@@ -347,6 +359,22 @@ describe('activate', () => {
     await activate(context);
 
     expect(relayInstances[0]?.connect).not.toHaveBeenCalled();
+    expect(mockVscode.window.showWarningMessage).toHaveBeenCalled();
+  });
+
+  it('reports initial relay connection failures', async () => {
+    relayConnectError.message = 'Offline';
+    const context = createContext();
+
+    await activate(context);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Could not connect to ws://127.0.0.1:8787/. Offline'
+      )
+    );
     expect(mockVscode.window.showWarningMessage).toHaveBeenCalled();
   });
 
@@ -389,6 +417,20 @@ describe('activate', () => {
     expect(transcriptStore.get(__testing.TRANSCRIPT_STORAGE_KEY)).toEqual([
       expect.objectContaining({ requestId: 'req-1', response: 'Hello' })
     ]);
+  });
+
+  it('announces generated shared secrets during activation', async () => {
+    configurationState.sharedSecret = '';
+    const context = createContext();
+
+    await activate(context);
+
+    expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('Generated a new Remote Copilot shared secret')
+    );
+    expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('generated a shared secret')
+    );
   });
 
   it('sends an error stream when prompt handling fails', async () => {
@@ -463,6 +505,98 @@ describe('activate', () => {
     expect(relay.reconnect).toHaveBeenCalled();
   });
 
+  it('suppresses duplicate relay help warnings and reports reconnect failures', async () => {
+    const context = createContext();
+    await activate(context);
+
+    const relay = relayInstances[0]!;
+
+    mockVscode.window.showWarningMessage.mockResolvedValueOnce({
+      title: 'Reconnect'
+    });
+    relay.reconnect.mockRejectedValueOnce(new Error('Reconnect failed'));
+
+    await relay.connectionProblemListener?.('Broken relay');
+    await relay.connectionProblemListener?.('Broken relay');
+
+    expect(mockVscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Reconnect failed'
+    );
+  });
+
+  it('handles command success and failure flows', async () => {
+    const context = createContext();
+    await activate(context);
+
+    const bridge = bridgeInstances[0]!;
+    const relay = relayInstances[0]!;
+
+    bridge.authorizeAccess.mockResolvedValueOnce('authorized');
+    await getCommand('remoteCopilot.authorizeCopilotAccess')();
+    expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'authorized'
+    );
+
+    bridge.authorizeAccess.mockRejectedValueOnce(new Error('No access'));
+    await getCommand('remoteCopilot.authorizeCopilotAccess')();
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'No access'
+    );
+
+    mockVscode.window.showInformationMessage.mockResolvedValueOnce(
+      'Open Settings'
+    );
+    await getCommand('remoteCopilot.copySharedSecret')();
+    expect(mockVscode.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.openSettings',
+      'remoteCopilot.sharedSecret'
+    );
+
+    relay.reconnect.mockRejectedValueOnce(new Error('Relay down'));
+    await getCommand('remoteCopilot.reconnectRelay')();
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Relay down'
+    );
+  });
+
+  it('shows errors for session commands when editor operations fail', async () => {
+    const context = createContext();
+    context.globalState.update = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Clear failed'));
+    await activate(context);
+
+    mockVscode.workspace.openTextDocument.mockRejectedValueOnce(
+      new Error('Open failed')
+    );
+
+    await getCommand('remoteCopilot.showRemoteSessions')();
+    await getCommand('remoteCopilot.clearRemoteSessions')();
+
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Open failed'
+    );
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Clear failed'
+    );
+  });
+
+  it('shows an error when copying the shared secret fails', async () => {
+    const context = createContext();
+    await activate(context);
+
+    mockVscode.env.clipboard.writeText.mockRejectedValueOnce(
+      new Error('Clipboard failed')
+    );
+
+    await getCommand('remoteCopilot.copySharedSecret')();
+
+    expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Clipboard failed'
+    );
+  });
+
   it('shows sessions and clears them through commands', async () => {
     const context = createContext();
     transcriptStore.set(__testing.TRANSCRIPT_STORAGE_KEY, [
@@ -487,5 +621,9 @@ describe('activate', () => {
 
     await getCommand('remoteCopilot.clearRemoteSessions')();
     expect(transcriptStore.get(__testing.TRANSCRIPT_STORAGE_KEY)).toEqual([]);
+  });
+
+  it('deactivates without cleanup work', () => {
+    expect(deactivate()).toBeUndefined();
   });
 });

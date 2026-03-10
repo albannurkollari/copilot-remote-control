@@ -1,6 +1,6 @@
 import {
-  createPingMessage,
   createPermissionId,
+  createPingMessage,
   createPongMessage,
   createRequestId,
   isRelayMessage,

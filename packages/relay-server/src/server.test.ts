@@ -3,9 +3,9 @@ import { afterEach } from 'vitest';
 import { WebSocket } from 'ws';
 
 import {
-  RelayServer,
-  loadRelayServerOptions,
-  startRelayServer
+    RelayServer,
+    loadRelayServerOptions,
+    startRelayServer
 } from './server.ts';
 
 const waitForOpen = (socket: WebSocket) => {
@@ -648,6 +648,342 @@ describe('RelayServer', () => {
       'disconnected before completing the request'
     );
 
+    discord.close();
+  });
+
+  it('warns when vscode requests permission for a missing prompt', async () => {
+    const server = new RelayServer({ port: 8807 });
+    servers.push(server);
+    await server.start();
+
+    const vscode = await createSocket(server.address);
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'missing',
+        permissionId: 'perm-1',
+        action: 'edit_file',
+        title: 'Edit file'
+      })
+    );
+
+    const status = await nextMessage(vscode);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('request_cancelled');
+    vscode.close();
+  });
+
+  it('warns when vscode streams a reply for a missing prompt', async () => {
+    const server = new RelayServer({ port: 8810 });
+    servers.push(server);
+    await server.start();
+
+    const vscode = await createSocket(server.address);
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'copilot_stream',
+        clientId: 'workspace-1',
+        requestId: 'missing',
+        done: true
+      })
+    );
+
+    const status = await nextMessage(vscode);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('request_cancelled');
+    vscode.close();
+  });
+
+  it('logs accumulated verbose replies when streams finish', async () => {
+    const server = new RelayServer({ port: 8808, verbose: true });
+    servers.push(server);
+    await server.start();
+
+    const logSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    try {
+      const discord = await createSocket(server.address);
+      const vscode = await createSocket(server.address);
+
+      discord.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'discord',
+          clientId: 'bot-1'
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('register_ack');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'vscode',
+          clientId: 'workspace-1'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+      const requestId = createRequestId();
+      discord.send(
+        JSON.stringify({
+          type: 'copilot_prompt',
+          clientId: 'workspace-1',
+          requestId,
+          mode: 'ask',
+          prompt: 'Explain this function'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId,
+          delta: 'Hello ',
+          done: false
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('copilot_stream');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId,
+          delta: 'world',
+          done: true
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('copilot_stream');
+      await Promise.resolve();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Hello world')
+      );
+
+      discord.close();
+      vscode.close();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('logs verbose stream errors when replies fail', async () => {
+    const server = new RelayServer({ port: 8809, verbose: true });
+    servers.push(server);
+    await server.start();
+
+    const logSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    try {
+      const discord = await createSocket(server.address);
+      const vscode = await createSocket(server.address);
+
+      discord.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'discord',
+          clientId: 'bot-1'
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('register_ack');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'vscode',
+          clientId: 'workspace-1'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+      const requestId = createRequestId();
+      discord.send(
+        JSON.stringify({
+          type: 'copilot_prompt',
+          clientId: 'workspace-1',
+          requestId,
+          mode: 'ask',
+          prompt: 'Explain this function'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId,
+          done: true,
+          error: 'Boom'
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('copilot_stream');
+      await Promise.resolve();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Error: Boom')
+      );
+
+      discord.close();
+      vscode.close();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('rejects permission responses for inactive requests', async () => {
+    const server = new RelayServer({ port: 8804 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    discord.send(
+      JSON.stringify({
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'missing',
+        permissionId: 'perm-1',
+        approved: true
+      })
+    );
+
+    const status = await nextMessage(discord);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('request_cancelled');
+    discord.close();
+  });
+
+  it('rejects permission responses sent by vscode clients', async () => {
+    const server = new RelayServer({ port: 8805 });
+    servers.push(server);
+    await server.start();
+
+    const vscode = await createSocket(server.address);
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'permission_response',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        approved: true
+      })
+    );
+
+    const status = await nextMessage(vscode);
+    expect(status.type).toBe('relay_status');
+    if (status.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${status.type}`);
+    }
+
+    expect(status.code).toBe('unsupported_message');
+    vscode.close();
+  });
+
+  it('rejects permission and stream messages sent from discord clients', async () => {
+    const server = new RelayServer({ port: 8806 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    discord.send(
+      JSON.stringify({
+        type: 'permission_request',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        permissionId: 'perm-1',
+        action: 'edit_file',
+        title: 'Edit file'
+      })
+    );
+
+    const permissionStatus = await nextMessage(discord);
+    expect(permissionStatus.type).toBe('relay_status');
+    if (permissionStatus.type !== 'relay_status') {
+      throw new Error(
+        `Expected relay_status but received ${permissionStatus.type}`
+      );
+    }
+
+    expect(permissionStatus.code).toBe('unsupported_message');
+
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_stream',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        done: true
+      })
+    );
+
+    const streamStatus = await nextMessage(discord);
+    expect(streamStatus.type).toBe('relay_status');
+    if (streamStatus.type !== 'relay_status') {
+      throw new Error(
+        `Expected relay_status but received ${streamStatus.type}`
+      );
+    }
+
+    expect(streamStatus.code).toBe('unsupported_message');
     discord.close();
   });
 });

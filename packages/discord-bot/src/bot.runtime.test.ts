@@ -517,6 +517,78 @@ describe('discord bot runtime flows', () => {
     );
   });
 
+  it('reports inactive permission responses', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const button = createButtonInteraction(
+      'remoteCopilot:permission:approve:missing'
+    );
+    await clientInstances[0].emitAsync('interactionCreate', button);
+
+    expect(button.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'This permission request is no longer active.',
+        flags: 64
+      })
+    );
+  });
+
+  it('ignores unrelated interactions', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const nonChatInteraction = {
+      isButton: () => false,
+      isChatInputCommand: () => false
+    } as any;
+
+    await clientInstances[0].emitAsync('interactionCreate', nonChatInteraction);
+
+    expect(relayInstances[0].sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it('replies with an error when prompt handling fails before acknowledgement', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const interaction = createChatInteraction();
+    interaction.deferReply.mockRejectedValueOnce(new Error('Prompt failed'));
+    interaction.reply.mockResolvedValueOnce(undefined);
+
+    await clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.reply).toHaveBeenCalledWith({
+        content: 'Error: Prompt failed',
+        flags: 64
+      });
+    });
+  });
+
   it('rejects button actions from other users and stops cleanly', async () => {
     const bot = createDiscordBot({
       applicationId: 'app-1',
@@ -564,5 +636,114 @@ describe('discord bot runtime flows', () => {
     await bot.stop();
     expect(relay.disconnect).toHaveBeenCalled();
     expect(clientInstances[0].destroy).toHaveBeenCalled();
+  });
+
+  it('reports button interaction update failures back to the requester', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+    const relay = relayInstances[0];
+    relay.sendPrompt.mockImplementation(
+      async (_message: any, handlers: any) => {
+        await handlers.onPermissionRequest({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-error',
+          requestId: 'req-error',
+          title: 'Edit file'
+        });
+      }
+    );
+
+    const interaction = createChatInteraction();
+    void clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    const button = createButtonInteraction(
+      'remoteCopilot:permission:approve:perm-error'
+    );
+    button.update.mockRejectedValueOnce(new Error('Update failed'));
+    await clientInstances[0].emitAsync('interactionCreate', button);
+
+    expect(button.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Error: Update failed',
+        flags: 64
+      })
+    );
+  });
+
+  it('swallows follow-up failures while reporting button interaction errors', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+    const relay = relayInstances[0];
+    relay.sendPrompt.mockImplementation(
+      async (_message: any, handlers: any) => {
+        await handlers.onPermissionRequest({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-error-2',
+          requestId: 'req-error-2',
+          title: 'Edit file'
+        });
+      }
+    );
+
+    const interaction = createChatInteraction();
+    void clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    const button = createButtonInteraction(
+      'remoteCopilot:permission:approve:perm-error-2'
+    );
+    button.update.mockRejectedValueOnce(new Error('Update failed again'));
+    button.reply.mockRejectedValueOnce(new Error('reply failed'));
+
+    await expect(
+      clientInstances[0].emitAsync('interactionCreate', button)
+    ).resolves.toBeUndefined();
+  });
+
+  it('edits an acknowledged interaction when initial handling fails', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const interaction = createChatInteraction();
+    interaction.deferred = true;
+    interaction.editReply.mockRejectedValueOnce(new Error('Edit failed'));
+
+    await clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.editReply).toHaveBeenCalledWith('Error: Edit failed');
+    });
   });
 });
