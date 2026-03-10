@@ -1,7 +1,14 @@
 import {
   type CopilotPromptMessage,
+  DEFAULT_MAX_SESSION_MESSAGES,
+  normalizeMaxSessionMessages,
+  normalizeWorkspaceRelativePath,
   type PermissionAction,
-  type PermissionRequestMessage
+  type PermissionRequestMessage,
+  renderPromptText,
+  toCommandArgs,
+  toToolExecutionPlan,
+  trimConversation
 } from '@remote-copilot/shared';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -17,166 +24,16 @@ export interface RunPromptHandlers {
   requestPermission: PermissionRequester;
 }
 
-type TerminalCommandExecution = {
-  command: string;
-  kind: 'run_terminal_command';
-};
-
-type FileEditExecution = {
-  content: string;
-  filePath: string;
-  kind: 'edit_file';
-};
-
-type VsCodeCommandExecution = {
-  args: unknown[];
-  commandId: string;
-  kind: 'execute_tool';
-};
-
-type ToolExecutionPlan =
-  | TerminalCommandExecution
-  | FileEditExecution
-  | VsCodeCommandExecution;
-
 export interface CopilotBridgeOptions {
   maxSessionMessages?: number;
 }
 
-const DEFAULT_MAX_SESSION_MESSAGES = 24;
 const REMOTE_COPILOT_TERMINAL_NAME = 'Remote Copilot';
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null;
-};
-
-const isNonEmptyString = (value: unknown): value is string => {
-  return typeof value === 'string' && value.trim().length > 0;
-};
 
 const MINIMAL_TOOL_RESULT = 'ok';
 
 const createExecutionResult = () => {
   return MINIMAL_TOOL_RESULT;
-};
-
-const createModeInstruction = (mode: CopilotPromptMessage['mode']) => {
-  switch (mode) {
-    case 'ask':
-      return 'Reply briefly.';
-    case 'plan':
-      return 'Reply with a brief plan.';
-    case 'agent':
-      return 'Act and reply briefly.';
-  }
-};
-
-const renderPromptText = (message: CopilotPromptMessage) => {
-  return [
-    createModeInstruction(message.mode),
-    `Ctx:${message.userDisplayName ?? 'unknown'}@${message.clientId}`,
-    message.prompt
-  ].join('\n');
-};
-
-const normalizeMaxSessionMessages = (value?: number) => {
-  if (value === undefined || Number.isNaN(value)) {
-    return DEFAULT_MAX_SESSION_MESSAGES;
-  }
-
-  return Math.max(1, Math.floor(value));
-};
-
-const trimConversation = <T>(messages: T[], maxMessages: number) => {
-  if (messages.length <= maxMessages) {
-    return [...messages];
-  }
-
-  return messages.slice(-maxMessages);
-};
-
-const normalizeWorkspaceRelativePath = (filePath: string) => {
-  const trimmed = filePath.trim();
-  if (trimmed.length === 0) {
-    throw new Error('File path must not be empty.');
-  }
-
-  const normalized = path.posix.normalize(
-    trimmed.replace(/\\/g, '/').replace(/^\/+/g, '')
-  );
-
-  if (
-    normalized.length === 0 ||
-    normalized === '.' ||
-    normalized.startsWith('../') ||
-    path.posix.isAbsolute(normalized)
-  ) {
-    throw new Error(
-      `File path must stay within the current workspace: ${filePath}`
-    );
-  }
-
-  return normalized;
-};
-
-const toCommandArgs = (input: unknown) => {
-  if (!isRecord(input)) {
-    return input === undefined ? [] : [input];
-  }
-
-  if (Array.isArray(input.args)) {
-    return [...input.args];
-  }
-
-  return Object.keys(input).length === 0 ? [] : [input];
-};
-
-const toToolExecutionPlan = (
-  name: string,
-  input: object
-): ToolExecutionPlan => {
-  const data = input as Record<string, unknown>;
-
-  if (name === 'run_terminal_command') {
-    if (!isNonEmptyString(data.command)) {
-      throw new Error('run_terminal_command requires a non-empty command.');
-    }
-
-    return {
-      kind: 'run_terminal_command',
-      command: data.command.trim()
-    };
-  }
-
-  if (name === 'edit_file') {
-    if (!isNonEmptyString(data.filePath)) {
-      throw new Error('edit_file requires a non-empty filePath.');
-    }
-
-    if (!isNonEmptyString(data.content)) {
-      throw new Error('edit_file requires a non-empty content string.');
-    }
-
-    return {
-      kind: 'edit_file',
-      filePath: data.filePath.trim(),
-      content: data.content
-    };
-  }
-
-  if (name === 'execute_tool') {
-    if (!isNonEmptyString(data.toolName)) {
-      throw new Error('execute_tool requires a non-empty toolName.');
-    }
-
-    return {
-      kind: 'execute_tool',
-      commandId: data.toolName.trim(),
-      args: toCommandArgs(data.input)
-    };
-  }
-
-  throw new Error(`Unsupported tool call: ${name}`);
 };
 
 const REMOTE_TOOLS: vscode.LanguageModelChatTool[] = [
@@ -692,7 +549,6 @@ export class CopilotBridge {
 
 export const __testing = {
   createExecutionResult,
-  createModeInstruction,
   DEFAULT_MAX_SESSION_MESSAGES,
   normalizeMaxSessionMessages,
   remoteTools: REMOTE_TOOLS,
