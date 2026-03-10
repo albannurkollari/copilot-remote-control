@@ -252,8 +252,27 @@ describe('extension helpers', () => {
     expect(reused.sharedSecret).toBe(generated.sharedSecret);
   });
 
+  it('creates or reuses the shared secret without copying when not requested', async () => {
+    configurationState.sharedSecret = 'existing-secret';
+
+    const result = await __testing.ensureSharedSecret();
+
+    expect(result).toEqual({
+      generated: false,
+      sharedSecret: 'existing-secret'
+    });
+    expect(mockVscode.env.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
   it('selects the workspace target when the secret is set there', () => {
     configurationState.target = 'workspace';
+    expect(__testing.getSharedSecretTarget()).toBe('workspace');
+  });
+
+  it('prefers the workspace target when a folder-level secret exists', () => {
+    const configuration = mockVscode.workspace.getConfiguration();
+    configuration.inspect.mockReturnValueOnce({ workspaceValue: 'secret' });
+
     expect(__testing.getSharedSecretTarget()).toBe('workspace');
   });
 
@@ -277,6 +296,50 @@ describe('extension helpers', () => {
 
     await __testing.clearTranscripts(context);
     expect(transcriptStore.get(__testing.TRANSCRIPT_STORAGE_KEY)).toEqual([]);
+  });
+
+  it('deduplicates transcripts and caps the stored history', async () => {
+    const context = createContext();
+
+    transcriptStore.set(
+      __testing.TRANSCRIPT_STORAGE_KEY,
+      Array.from({ length: __testing.MAX_TRANSCRIPTS }, (_, index) => ({
+        clientId: 'workspace-1',
+        finishedAt: `finish-${index}`,
+        mode: 'ask',
+        permissions: [],
+        prompt: `Prompt ${index}`,
+        requestId: `req-${index}`,
+        response: `Response ${index}`,
+        startedAt: `start-${index}`
+      }))
+    );
+
+    await __testing.saveTranscript(context, {
+      clientId: 'workspace-1',
+      finishedAt: 'new-finish',
+      mode: 'ask',
+      permissions: [],
+      prompt: 'Updated prompt',
+      requestId: 'req-1',
+      response: 'Updated response',
+      startedAt: 'new-start'
+    });
+
+    const entries = transcriptStore.get(
+      __testing.TRANSCRIPT_STORAGE_KEY
+    ) as Array<{ requestId: string; response: string }>;
+
+    expect(entries).toHaveLength(__testing.MAX_TRANSCRIPTS);
+    expect(entries[0]).toEqual(
+      expect.objectContaining({
+        requestId: 'req-1',
+        response: 'Updated response'
+      })
+    );
+    expect(entries.filter((entry) => entry.requestId === 'req-1')).toHaveLength(
+      1
+    );
   });
 
   it('renders transcript markdown and fences embedded backticks safely', () => {
@@ -309,6 +372,24 @@ describe('extension helpers', () => {
         }
       ])
     ).toContain('Stored transcripts: 1');
+  });
+
+  it('renders empty permission and response sections compactly', () => {
+    const markdown = __testing.renderTranscriptMarkdown([
+      {
+        clientId: 'workspace-1',
+        finishedAt: 'finish',
+        mode: 'ask',
+        permissions: [],
+        prompt: 'prompt',
+        requestId: 'req-empty',
+        response: '',
+        startedAt: 'start'
+      }
+    ]);
+
+    expect(markdown).toContain('None');
+    expect(markdown).toContain('(no response text)');
   });
 
   it('normalizes thrown values into user-facing errors', () => {
@@ -457,6 +538,31 @@ describe('activate', () => {
     );
   });
 
+  it('logs transcript save failures after prompt handling completes', async () => {
+    const context = createContext();
+    context.globalState.update = vi
+      .fn()
+      .mockRejectedValue(new Error('Save failed'));
+
+    await activate(context);
+
+    const relay = relayInstances[0]!;
+
+    await relay.promptListener?.({
+      type: 'copilot_prompt',
+      clientId: 'workspace-1',
+      requestId: 'req-transcript-error',
+      mode: 'ask',
+      prompt: 'Explain',
+      userDisplayName: 'alice'
+    });
+    await vi.waitFor(() => {
+      expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+        '[transcript:error] Save failed'
+      );
+    });
+  });
+
   it('forwards cancel and status events', async () => {
     const context = createContext();
     await activate(context);
@@ -557,6 +663,17 @@ describe('activate', () => {
     await getCommand('remoteCopilot.reconnectRelay')();
     expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
       'Relay down'
+    );
+  });
+
+  it('shows a success message when reconnecting the relay manually', async () => {
+    const context = createContext();
+    await activate(context);
+
+    await getCommand('remoteCopilot.reconnectRelay')();
+
+    expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'Remote Copilot relay reconnected.'
     );
   });
 

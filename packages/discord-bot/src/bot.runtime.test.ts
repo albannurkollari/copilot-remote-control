@@ -542,6 +542,25 @@ describe('discord bot runtime flows', () => {
     );
   });
 
+  it('ignores unrelated button custom ids', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const button = createButtonInteraction('other:custom:id');
+    await clientInstances[0].emitAsync('interactionCreate', button);
+
+    expect(button.reply).not.toHaveBeenCalled();
+    expect(button.update).not.toHaveBeenCalled();
+  });
+
   it('ignores unrelated interactions', async () => {
     createDiscordBot({
       applicationId: 'app-1',
@@ -587,6 +606,30 @@ describe('discord bot runtime flows', () => {
         flags: 64
       });
     });
+  });
+
+  it('swallows expired Discord interactions before a reply is sent', async () => {
+    createDiscordBot({
+      applicationId: 'app-1',
+      clientId: 'discord-bot',
+      guildId: 'guild-1',
+      relayUrl: 'ws://relay.test',
+      sharedSecret: 'secret',
+      targetClientId: 'workspace-1',
+      token: 'token',
+      updateIntervalMs: 1
+    });
+
+    const interaction = createChatInteraction();
+    interaction.options.getString.mockImplementation(() => {
+      throw Object.assign(new Error('Expired'), { code: 10062 });
+    });
+
+    await expect(
+      clientInstances[0].emitAsync('interactionCreate', interaction)
+    ).resolves.toBeUndefined();
+
+    expect(interaction.reply).not.toHaveBeenCalled();
   });
 
   it('rejects button actions from other users and stops cleanly', async () => {

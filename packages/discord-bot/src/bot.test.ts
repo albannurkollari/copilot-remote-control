@@ -43,6 +43,12 @@ describe('discord bot approval helpers', () => {
     expect(
       __testing.parsePromptCustomId('remoteCopilot:prompt:deny:req-1')
     ).toBeNull();
+    expect(
+      __testing.parseApprovalCustomId('remoteCopilot:permission:approve:')
+    ).toBeNull();
+    expect(
+      __testing.parsePromptCustomId('remoteCopilot:prompt:cancel:')
+    ).toBeNull();
   });
 
   it('formats permission requests with truncation', () => {
@@ -450,6 +456,91 @@ describe('handleCopilotInteraction', () => {
     expect(interaction.editReply).toHaveBeenLastCalledWith(
       expect.objectContaining({
         content: expect.stringContaining('Error: boom')
+      })
+    );
+  });
+
+  it('records denied permissions and stream errors in the buffered reply', async () => {
+    const interaction = {
+      channel: { isThread: () => true },
+      channelId: 'thread-1',
+      deferred: false,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      followUp: vi.fn().mockResolvedValue(undefined),
+      id: 'message-1',
+      options: {
+        getString: vi.fn((name: string) => {
+          return name === 'mode' ? 'ask' : 'Explain this';
+        })
+      },
+      replied: false,
+      user: {
+        globalName: null,
+        id: 'user-1',
+        username: 'alice'
+      },
+      deferReply: vi.fn().mockResolvedValue(undefined)
+    } as any;
+
+    const relayClient = {
+      respondToPermissionRequest: vi.fn(),
+      sendPrompt: vi.fn(async (_message, handlers) => {
+        await handlers.onPermissionRequest?.({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-1',
+          requestId: 'req-1',
+          title: 'Edit file'
+        });
+        await handlers.onStatus?.({
+          type: 'relay_status',
+          code: 'client_connected',
+          level: 'info',
+          message: 'connected'
+        });
+        await handlers.onStream?.({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId: 'req-1',
+          done: true,
+          error: 'Tool failed'
+        });
+      })
+    } as any;
+
+    await handleCopilotInteraction(
+      interaction,
+      relayClient,
+      { targetClientId: 'workspace-1', updateIntervalMs: 1 },
+      vi.fn().mockResolvedValue({ approved: false, reason: 'Denied' }),
+      {
+        cancelPendingApprovals: vi.fn(),
+        registerPendingPrompt: vi.fn(),
+        unregisterPendingPrompt: vi.fn()
+      }
+    );
+
+    expect(relayClient.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thread-1',
+        userDisplayName: 'alice'
+      }),
+      expect.any(Object)
+    );
+    expect(relayClient.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-1' }),
+      false,
+      'Denied'
+    );
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Permission request denied: Edit file')
+      })
+    );
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Tool failed')
       })
     );
   });

@@ -1,11 +1,11 @@
 import {
-    createModeInstruction,
-    DEFAULT_MAX_SESSION_MESSAGES,
-    normalizeMaxSessionMessages,
-    normalizeWorkspaceRelativePath,
-    renderPromptText,
-    toToolExecutionPlan,
-    trimConversation
+  createModeInstruction,
+  DEFAULT_MAX_SESSION_MESSAGES,
+  normalizeMaxSessionMessages,
+  normalizeWorkspaceRelativePath,
+  renderPromptText,
+  toToolExecutionPlan,
+  trimConversation
 } from '@remote-copilot/shared';
 import { vi } from 'vitest';
 
@@ -318,6 +318,19 @@ describe('copilot bridge tool execution helpers', () => {
     expect(model.sendRequest).not.toHaveBeenCalled();
   });
 
+  it('returns false when cancelling an unknown prompt', () => {
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    expect(bridge.cancelPrompt('missing')).toBe(false);
+  });
+
   it('authorizes access by sending the minimal authorization prompt', async () => {
     const model = {
       id: 'copilot-auto',
@@ -350,6 +363,33 @@ describe('copilot bridge tool execution helpers', () => {
       ],
       {},
       expect.any(Object)
+    );
+  });
+
+  it('logs unknown model identifiers during authorization', async () => {
+    const outputChannel = { appendLine: vi.fn() };
+    const model = {
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([]),
+        text: toAsyncIterable(['authorized'])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => false
+        }
+      } as never,
+      outputChannel as never
+    );
+
+    await bridge.authorizeAccess();
+
+    expect(outputChannel.appendLine).toHaveBeenCalledWith(
+      '[copilot] Authorizing access with model unknown.'
     );
   });
 
@@ -781,6 +821,192 @@ describe('copilot bridge tool execution helpers', () => {
     expect(capturedToken?.isCancellationRequested).toBe(true);
   });
 
+  it('fails early when the prompt token is already cancelled', async () => {
+    const originalTokenSource = mockVscode.CancellationTokenSource;
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn()
+    };
+
+    mockVscode.CancellationTokenSource = class {
+      token = { isCancellationRequested: true };
+
+      cancel() {}
+
+      dispose() {}
+    } as any;
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    try {
+      const bridge = new CopilotBridge(
+        {
+          languageModelAccessInformation: {
+            canSendRequest: () => true
+          }
+        } as never,
+        { appendLine: vi.fn() } as never
+      );
+
+      await expect(
+        bridge.runPrompt(
+          {
+            type: 'copilot_prompt',
+            clientId: 'default',
+            requestId: 'req-cancelled',
+            mode: 'ask',
+            prompt: 'Hello',
+            userDisplayName: 'alice'
+          },
+          {
+            onText: vi.fn(),
+            requestPermission: vi.fn()
+          }
+        )
+      ).rejects.toThrow('Request cancelled.');
+      expect(model.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      mockVscode.CancellationTokenSource = originalTokenSource;
+    }
+  });
+
+  it('reuses an existing active terminal', async () => {
+    const terminal = {
+      exitStatus: undefined,
+      sendText: vi.fn(),
+      show: vi.fn()
+    };
+    const toolCall = new mockVscode.LanguageModelToolCallPart(
+      'call-1',
+      'run_terminal_command',
+      {
+        command: 'pnpm test'
+      }
+    );
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([toolCall]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([toolCall]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([]),
+          text: toAsyncIterable([])
+        })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+    mockVscode.window.createTerminal.mockReturnValue(terminal);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    for (const requestId of ['req-1', 'req-2']) {
+      await bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId,
+          mode: 'agent',
+          prompt: 'Run tests',
+          userDisplayName: 'alice'
+        },
+        {
+          onText: vi.fn(),
+          requestPermission: vi.fn().mockResolvedValue({ approved: true })
+        }
+      );
+    }
+
+    expect(mockVscode.window.createTerminal).toHaveBeenCalledTimes(1);
+    expect(terminal.sendText).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips parent directory creation when the workspace closes mid-edit', async () => {
+    const toolCall = new mockVscode.LanguageModelToolCallPart(
+      'call-1',
+      'edit_file',
+      {
+        filePath: 'src/index.ts',
+        content: 'console.log("hi")\n'
+      }
+    );
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([toolCall]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([]),
+          text: toAsyncIterable([])
+        })
+    };
+
+    const folders = [{ uri: 'workspace-uri' }];
+    Object.defineProperty(mockVscode.workspace, 'workspaceFolders', {
+      configurable: true,
+      get: vi.fn().mockReturnValueOnce(folders).mockReturnValueOnce(undefined)
+    });
+
+    try {
+      mockVscode.selectChatModels.mockResolvedValue([model]);
+      mockVscode.Uri.joinPath.mockImplementation((...parts: unknown[]) =>
+        parts.join('/')
+      );
+
+      const bridge = new CopilotBridge(
+        {
+          languageModelAccessInformation: {
+            canSendRequest: () => true
+          }
+        } as never,
+        { appendLine: vi.fn() } as never
+      );
+
+      await bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId: 'req-mid-close',
+          mode: 'agent',
+          prompt: 'Edit file',
+          userDisplayName: 'alice'
+        },
+        {
+          onText: vi.fn(),
+          requestPermission: vi.fn().mockResolvedValue({ approved: true })
+        }
+      );
+
+      expect(mockVscode.workspace.fs.createDirectory).not.toHaveBeenCalled();
+      expect(mockVscode.workspace.fs.writeFile).toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(mockVscode.workspace, 'workspaceFolders', {
+        configurable: true,
+        writable: true,
+        value: []
+      });
+    }
+  });
+
   it('fails to edit files when no workspace is open', async () => {
     const toolCall = new mockVscode.LanguageModelToolCallPart(
       'call-1',
@@ -856,6 +1082,129 @@ describe('copilot bridge tool execution helpers', () => {
         }
       )
     ).rejects.toThrow(/No GitHub Copilot chat model is available/);
+  });
+
+  it('rejects prompt execution when Copilot access has not been authorized', async () => {
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn()
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => false
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await expect(
+      bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId: 'req-no-access',
+          mode: 'ask',
+          prompt: 'Hello',
+          userDisplayName: 'alice'
+        },
+        {
+          onText: vi.fn(),
+          requestPermission: vi.fn()
+        }
+      )
+    ).rejects.toThrow(/has not been authorized/);
+  });
+
+  it('recreates the terminal after the previous one has exited', async () => {
+    const firstTerminal = {
+      exitStatus: { code: 0 },
+      sendText: vi.fn(),
+      show: vi.fn()
+    };
+    const secondTerminal = {
+      exitStatus: undefined,
+      sendText: vi.fn(),
+      show: vi.fn()
+    };
+    const toolCall = new mockVscode.LanguageModelToolCallPart(
+      'call-1',
+      'run_terminal_command',
+      {
+        command: 'pnpm test'
+      }
+    );
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([toolCall]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([toolCall]),
+          text: toAsyncIterable([])
+        })
+        .mockResolvedValueOnce({
+          stream: toAsyncIterable([]),
+          text: toAsyncIterable([])
+        })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+    mockVscode.window.createTerminal
+      .mockReturnValueOnce(firstTerminal as never)
+      .mockReturnValueOnce(secondTerminal);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-1',
+        mode: 'agent',
+        prompt: 'Run tests',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn().mockResolvedValue({ approved: true })
+      }
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-2',
+        mode: 'agent',
+        prompt: 'Run tests again',
+        userDisplayName: 'alice'
+      },
+      {
+        onText: vi.fn(),
+        requestPermission: vi.fn().mockResolvedValue({ approved: true })
+      }
+    );
+
+    expect(mockVscode.window.createTerminal).toHaveBeenCalledTimes(2);
+    expect(secondTerminal.sendText).toHaveBeenCalledWith('pnpm test', true);
   });
 
   it('requires the full Copilot chat api surface when selecting models', async () => {

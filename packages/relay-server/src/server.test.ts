@@ -3,9 +3,9 @@ import { afterEach } from 'vitest';
 import { WebSocket } from 'ws';
 
 import {
-    RelayServer,
-    loadRelayServerOptions,
-    startRelayServer
+  RelayServer,
+  loadRelayServerOptions,
+  startRelayServer
 } from './server.ts';
 
 const waitForOpen = (socket: WebSocket) => {
@@ -70,6 +70,18 @@ describe('RelayServer', () => {
 
     expect(server).toBeInstanceOf(RelayServer);
     expect(server.address).toBe('ws://127.0.0.1:8803/');
+  });
+
+  it('starts and stops idempotently', async () => {
+    const server = new RelayServer({ port: 8811 });
+    servers.push(server);
+
+    await server.start();
+    await server.start();
+    await server.stop();
+    await server.stop();
+
+    expect(server.address).toBe('ws://127.0.0.1:8811/');
   });
 
   it('registers clients and routes prompt streams', async () => {
@@ -452,6 +464,116 @@ describe('RelayServer', () => {
     }
 
     expect(status.code).toBe('unsupported_message');
+    vscode.close();
+  });
+
+  it('rejects server-managed messages sent by registered clients', async () => {
+    const server = new RelayServer({ port: 8812 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    for (const type of ['register_ack', 'relay_status', 'pong'] as const) {
+      discord.send(
+        JSON.stringify(
+          type === 'pong'
+            ? { type, timestamp: '2026-03-10T00:00:00.000Z' }
+            : type === 'register_ack'
+              ? {
+                  type,
+                  clientRole: 'discord',
+                  clientId: 'bot-1',
+                  connectionId: 'conn-1'
+                }
+              : {
+                  type,
+                  code: 'request_failed',
+                  level: 'error',
+                  message: 'Nope'
+                }
+        )
+      );
+
+      const status = await nextMessage(discord);
+      expect(status.type).toBe('relay_status');
+      if (status.type !== 'relay_status') {
+        throw new Error(`Expected relay_status but received ${status.type}`);
+      }
+
+      expect(status.message).toContain('server-managed');
+    }
+
+    discord.close();
+  });
+
+  it('rejects cancel requests from vscode clients and inactive discord cancels', async () => {
+    const server = new RelayServer({ port: 8813 });
+    servers.push(server);
+    await server.start();
+
+    const discord = await createSocket(server.address);
+    const vscode = await createSocket(server.address);
+
+    discord.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'discord',
+        clientId: 'bot-1'
+      })
+    );
+    expect((await nextMessage(discord)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'register',
+        clientRole: 'vscode',
+        clientId: 'workspace-1'
+      })
+    );
+    expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+    vscode.send(
+      JSON.stringify({
+        type: 'copilot_cancel',
+        clientId: 'workspace-1',
+        requestId: 'req-1'
+      })
+    );
+
+    const unsupported = await nextMessage(vscode);
+    expect(unsupported.type).toBe('relay_status');
+    if (unsupported.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${unsupported.type}`);
+    }
+
+    expect(unsupported.code).toBe('unsupported_message');
+
+    discord.send(
+      JSON.stringify({
+        type: 'copilot_cancel',
+        clientId: 'workspace-1',
+        requestId: 'missing'
+      })
+    );
+
+    const missing = await nextMessage(discord);
+    expect(missing.type).toBe('relay_status');
+    if (missing.type !== 'relay_status') {
+      throw new Error(`Expected relay_status but received ${missing.type}`);
+    }
+
+    expect(missing.message).toContain('no longer active');
+
+    discord.close();
     vscode.close();
   });
 
