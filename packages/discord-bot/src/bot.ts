@@ -1,30 +1,30 @@
 import { type PermissionRequestMessage } from '@remote-copilot/shared';
 import {
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    Client,
-    Events,
-    GatewayIntentBits,
-    MessageFlags,
-    REST,
-    Routes,
-    type ButtonInteraction,
-    type ChatInputCommandInteraction,
-    type InteractionReplyOptions,
-    type Message
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Client,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  REST,
+  Routes,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  type InteractionReplyOptions,
+  type Message
 } from 'discord.js';
 import pc from 'picocolors';
 
 import {
-    buildCopilotPromptMessage,
-    COPILOT_COMMAND_NAME,
-    createCopilotCommand,
-    parseCopilotCommand
+  buildCopilotPromptMessage,
+  COPILOT_COMMAND_NAME,
+  createCopilotCommand,
+  parseCopilotCommand
 } from './commands/copilot.ts';
 import {
-    RelayDiscordClient,
-    type RelayDiscordClientOptions
+  RelayDiscordClient,
+  type RelayDiscordClientOptions
 } from './relayClient.ts';
 
 export interface DiscordBotConfig extends RelayDiscordClientOptions {
@@ -427,7 +427,9 @@ export const handleCopilotInteraction = async (
   ) => Promise<ApprovalDecision>,
   options: {
     cancelPendingApprovals: (requestId: string, reason: string) => void;
-    registerPendingPrompt: (pending: PendingPrompt & { requestId: string }) => void;
+    registerPendingPrompt: (
+      pending: PendingPrompt & { requestId: string }
+    ) => void;
     unregisterPendingPrompt: (requestId: string) => void;
   }
 ) => {
@@ -467,7 +469,9 @@ export const handleCopilotInteraction = async (
         reply.clearComponents();
         await reply.flushNow();
 
-        const cancelled = await relayClient.cancelPrompt(promptMessage.requestId);
+        const cancelled = await relayClient.cancelPrompt(
+          promptMessage.requestId
+        );
         if (!cancelled) {
           throw new Error('This request is no longer active.');
         }
@@ -478,10 +482,7 @@ export const handleCopilotInteraction = async (
       onPermissionRequest: async (message) => {
         const decision = await requestPermissionApproval(interaction, message);
 
-        if (
-          !decision.approved &&
-          decision.reason !== DISCORD_CANCEL_REASON
-        ) {
+        if (!decision.approved && decision.reason !== DISCORD_CANCEL_REASON) {
           reply.addNote(`Permission request denied: ${message.title}`);
         }
 

@@ -281,7 +281,9 @@ describe('RelayServer', () => {
     const cancelStatus = await cancelStatusPromise;
     expect(cancelStatus.type).toBe('relay_status');
     if (cancelStatus.type !== 'relay_status') {
-      throw new Error(`Expected relay_status but received ${cancelStatus.type}`);
+      throw new Error(
+        `Expected relay_status but received ${cancelStatus.type}`
+      );
     }
 
     expect(cancelStatus.code).toBe('request_cancelled');

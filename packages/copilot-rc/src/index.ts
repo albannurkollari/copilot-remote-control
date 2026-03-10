@@ -8,18 +8,18 @@ import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 
 import {
-    type EnvMode,
-    type EnvValues,
-    applyEnvValuesToProcess,
-    buildRelayUrl,
-    fileExists,
-    formatVsCodeSettings,
-    hasMissingRequiredEnvValues,
-    isMeaningfulValue,
-    loadRemoteCopilotEnv,
-    mergeRemoteCopilotEnvValues,
-    normalizeRelayPath,
-    writeRemoteCopilotEnvFile
+  type EnvMode,
+  type EnvValues,
+  applyEnvValuesToProcess,
+  buildRelayUrl,
+  fileExists,
+  formatVsCodeSettings,
+  hasMissingRequiredEnvValues,
+  isMeaningfulValue,
+  loadRemoteCopilotEnv,
+  mergeRemoteCopilotEnvValues,
+  normalizeRelayPath,
+  writeRemoteCopilotEnvFile
 } from '../../../scripts/env.ts';
 import { runRemoteControlStack } from './runtime.ts';
 
