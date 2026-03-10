@@ -221,6 +221,8 @@ export class CopilotBridge {
     }
   >();
   #outputChannel: vscode.OutputChannel;
+  #runQueue = Promise.resolve();
+  #sharedConversation: vscode.LanguageModelChatMessage[] = [];
   #terminal?: vscode.Terminal;
 
   constructor(
@@ -284,6 +286,23 @@ export class CopilotBridge {
   }
 
   async runPrompt(message: CopilotPromptMessage, handlers: RunPromptHandlers) {
+    const run = async () => {
+      await this.#runPromptInSession(message, handlers);
+    };
+
+    const nextRun = this.#runQueue.then(run, run);
+    this.#runQueue = nextRun.then(
+      () => undefined,
+      () => undefined
+    );
+
+    await nextRun;
+  }
+
+  async #runPromptInSession(
+    message: CopilotPromptMessage,
+    handlers: RunPromptHandlers
+  ) {
     const api = this.#getLanguageModelApi();
     const model = await this.#selectModel();
     const canSend =
@@ -300,17 +319,24 @@ export class CopilotBridge {
 
     const tokenSource = new api.CancellationTokenSource();
     this.#activePrompts.set(message.requestId, { tokenSource });
-    const conversation = [
-      api.LanguageModelChatMessage.User(this.#renderPrompt(message))
-    ];
+    const userMessage = api.LanguageModelChatMessage.User(
+      this.#renderPrompt(message)
+    );
+    const conversation = [...this.#sharedConversation, userMessage];
 
     try {
+      if (tokenSource.token.isCancellationRequested) {
+        throw new Error(
+          this.#toUserFacingError('Request cancelled.', message.requestId)
+        );
+      }
+
       const response = await model.sendRequest(
         conversation,
         { tools: REMOTE_TOOLS },
         tokenSource.token
       );
-      await this.#streamResponse(
+      const assistantText = await this.#streamResponse(
         response,
         model,
         conversation,
@@ -318,6 +344,14 @@ export class CopilotBridge {
         handlers,
         tokenSource.token
       );
+
+      if (assistantText.trim().length > 0) {
+        conversation.push(
+          api.LanguageModelChatMessage.Assistant(assistantText)
+        );
+      }
+
+      this.#sharedConversation = conversation;
     } catch (error) {
       throw new Error(this.#toUserFacingError(error, message.requestId));
     } finally {
@@ -335,9 +369,11 @@ export class CopilotBridge {
     token: vscode.CancellationToken
   ) {
     const api = this.#getLanguageModelApi();
+    let assistantText = '';
 
     for await (const part of response.stream) {
       if (part instanceof api.LanguageModelTextPart) {
+        assistantText += part.value;
         await handlers.onText(part.value);
         continue;
       }
@@ -371,7 +407,7 @@ export class CopilotBridge {
           { tools: REMOTE_TOOLS },
           token
         );
-        await this.#streamResponse(
+        assistantText += await this.#streamResponse(
           followUp,
           model,
           conversation,
@@ -379,9 +415,11 @@ export class CopilotBridge {
           handlers,
           token
         );
-        return;
+        return assistantText;
       }
     }
+
+    return assistantText;
   }
 
   async #executeApprovedToolCall(part: vscode.LanguageModelToolCallPart) {
