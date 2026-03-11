@@ -64,6 +64,7 @@ export interface CopilotPromptMessage {
   clientId: string;
   requestId: string;
   mode: CopilotMode;
+  model?: string;
   prompt: string;
   userDisplayName?: string;
   channelId?: string;
@@ -357,6 +358,7 @@ export const parseRelayMessage = (value: unknown): ParseRelayMessageResult => {
           clientId: message.clientId,
           requestId: message.requestId,
           mode: message.mode,
+          model: isString(message.model) ? message.model : undefined,
           prompt: message.prompt,
           userDisplayName: isString(message.userDisplayName)
             ? message.userDisplayName

@@ -1084,6 +1084,118 @@ describe('copilot bridge tool execution helpers', () => {
     ).rejects.toThrow(/No GitHub Copilot chat model is available/);
   });
 
+  it('uses the specified model when it is available', async () => {
+    const requestedModel = {
+      id: 'gpt-4o',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([
+          new mockVscode.LanguageModelTextPart('Hello')
+        ]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels
+      .mockResolvedValueOnce([requestedModel])
+      .mockResolvedValue([]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    const onText = vi.fn();
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-model-override',
+        mode: 'ask',
+        model: 'gpt-4o',
+        prompt: 'Hello',
+        userDisplayName: 'alice'
+      },
+      { onText, requestPermission: vi.fn() }
+    );
+
+    expect(requestedModel.sendRequest).toHaveBeenCalled();
+    expect(onText).toHaveBeenCalledWith('Hello');
+  });
+
+  it('falls back to copilot-auto when specified model is unavailable', async () => {
+    const autoModel = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([
+          new mockVscode.LanguageModelTextPart('Fallback')
+        ]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([autoModel])
+      .mockResolvedValue([]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    const onText = vi.fn();
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-model-fallback',
+        mode: 'ask',
+        model: 'gpt-4.1',
+        prompt: 'Hello',
+        userDisplayName: 'alice'
+      },
+      { onText, requestPermission: vi.fn() }
+    );
+
+    expect(autoModel.sendRequest).toHaveBeenCalled();
+    expect(onText).toHaveBeenCalledWith('Fallback');
+  });
+
+  it('throws when copilot-auto is unavailable and no model was specified', async () => {
+    mockVscode.selectChatModels.mockResolvedValue([]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await expect(
+      bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId: 'req-any-model',
+          mode: 'ask',
+          prompt: 'Hello',
+          userDisplayName: 'alice'
+        },
+        { onText: vi.fn(), requestPermission: vi.fn() }
+      )
+    ).rejects.toThrow(/No GitHub Copilot chat model is available/);
+  });
+
   it('rejects prompt execution when Copilot access has not been authorized', async () => {
     const model = {
       id: 'copilot-auto',
