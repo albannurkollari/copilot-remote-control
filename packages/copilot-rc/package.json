@@ -1,6 +1,6 @@
 {
   "name": "copilot-rc",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": false,
   "description": "CLI for initializing and running the Remote Copilot relay server and Discord bot.",
   "keywords": [
