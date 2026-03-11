@@ -195,7 +195,7 @@ export class CopilotBridge {
     handlers: RunPromptHandlers
   ) {
     const api = this.#getLanguageModelApi();
-    const model = await this.#selectModel();
+    const model = await this.#selectModel(message.model);
     const canSend =
       this.#context.languageModelAccessInformation.canSendRequest(model);
     this.#outputChannel.appendLine(
@@ -400,17 +400,29 @@ export class CopilotBridge {
     );
   }
 
-  async #selectModel() {
+  async #selectModel(modelId?: string) {
     const { lm } = this.#getLanguageModelApi();
-    const models = await lm.selectChatModels({ vendor: 'copilot' });
 
-    if (models.length === 0) {
-      throw new Error(
-        'No GitHub Copilot chat model is available in this VS Code instance.'
-      );
+    if (modelId) {
+      const specific = await lm.selectChatModels({
+        vendor: 'copilot',
+        id: modelId
+      });
+      if (specific.length > 0) return specific[0];
     }
 
-    return models[0];
+    const autoModels = await lm.selectChatModels({
+      vendor: 'copilot',
+      id: 'copilot-auto'
+    });
+
+    if (autoModels.length > 0) {
+      return autoModels[0];
+    }
+
+    throw new Error(
+      'No GitHub Copilot chat model is available in this VS Code instance.'
+    );
   }
 
   #renderPrompt(message: CopilotPromptMessage) {
