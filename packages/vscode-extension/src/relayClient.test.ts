@@ -514,6 +514,43 @@ describe('VscodeRelayClient', () => {
     );
   });
 
+  it('logs non-Error reconnect failures as strings', async () => {
+    const client = new VscodeRelayClient({
+      clientId: 'workspace-1',
+      outputChannel,
+      reconnectDelayMs: 10,
+      sharedSecret: 'secret',
+      url: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'vscode',
+          clientId: 'workspace-1',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    vi.spyOn(client, 'connect').mockRejectedValueOnce('plain string error');
+
+    socket.emit('error', new Error('boom'));
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.resolve();
+
+    expect(outputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('Relay reconnect failed: plain string error')
+    );
+  });
+
   it('times out waiting for permission responses', async () => {
     const client = new VscodeRelayClient({
       clientId: 'workspace-1',

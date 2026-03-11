@@ -1,6 +1,4 @@
 {
-  "remoteCopilot.clientId": "default",
-  "remoteCopilot.relayUrl": "ws://127.0.0.1:8787/",
   "editor.codeActionsOnSave": {
     "source.organizeImports": "explicit",
     "source.fixAll.oxc": "explicit"

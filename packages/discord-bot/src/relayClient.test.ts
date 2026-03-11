@@ -121,6 +121,258 @@ describe('RelayDiscordClient', () => {
     expect(onConnected).toHaveBeenCalled();
   });
 
+  it('reuses an established connection and ignores duplicate acknowledgements or missing pending requests', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    await expect(client.connect()).resolves.toBeUndefined();
+    expect(sockets).toHaveLength(1);
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-duplicate'
+        })
+      )
+    );
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-missing',
+          requestId: 'req-missing',
+          title: 'Edit file'
+        })
+      )
+    );
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId: 'req-missing',
+          delta: 'ignored',
+          done: false
+        })
+      )
+    );
+
+    expect(client.isConnected).toBe(true);
+  });
+
+  it('rejects malformed relay payloads during registration and disconnects active prompts when malformed messages arrive later', async () => {
+    const connectingClient = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = connectingClient.connect();
+    const firstSocket = latestSocket();
+    firstSocket.readyState = 1;
+    firstSocket.emit('open');
+    firstSocket.emit('message', Buffer.from('{bad-json'));
+
+    await expect(connecting).rejects.toThrow();
+
+    const connectedClient = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      reconnectDelayMs: 10,
+      relayUrl: 'ws://relay.test'
+    });
+    const onDisconnected = vi.fn();
+    connectedClient.on('disconnected', onDisconnected);
+
+    const connected = connectedClient.connect();
+    const secondSocket = latestSocket();
+    secondSocket.readyState = 1;
+    secondSocket.emit('open');
+    secondSocket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connected;
+
+    const promptPromise = connectedClient.sendPrompt({
+      type: 'copilot_prompt',
+      clientId: 'workspace-1',
+      requestId: 'req-1',
+      mode: 'ask',
+      prompt: 'Explain'
+    });
+    await Promise.resolve();
+
+    secondSocket.emit('message', Buffer.from('{bad-json'));
+
+    await expect(promptPromise).rejects.toThrow(
+      'Relay connection was interrupted.'
+    );
+    expect(onDisconnected).toHaveBeenCalled();
+
+    await vi.runOnlyPendingTimersAsync();
+    expect(sockets.length).toBeGreaterThan(2);
+  });
+
+  it('normalizes non-Error socket failures and handler rejections', async () => {
+    const failedClient = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      relayUrl: 'ws://relay.test'
+    });
+
+    const failedConnect = failedClient.connect();
+    latestSocket().emit('error', 'boom');
+    await expect(failedConnect).rejects.toThrow('boom');
+
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      reconnectDelayMs: 10,
+      relayUrl: 'ws://relay.test'
+    });
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    const promptPromise = client.sendPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'workspace-1',
+        requestId: 'req-1',
+        mode: 'ask',
+        prompt: 'Explain'
+      },
+      {
+        onPermissionRequest: vi.fn().mockRejectedValue('handler failed')
+      }
+    );
+    await Promise.resolve();
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'permission_request',
+          action: 'edit_file',
+          clientId: 'workspace-1',
+          permissionId: 'perm-1',
+          requestId: 'req-1',
+          title: 'Edit file'
+        })
+      )
+    );
+
+    await expect(promptPromise).rejects.toThrow(
+      'Relay connection was interrupted.'
+    );
+  });
+
+  it('ignores unexpected server-managed messages and swallows failed reconnect attempts after live socket errors', async () => {
+    const client = new RelayDiscordClient({
+      clientId: 'discord-bot',
+      reconnectDelayMs: 10,
+      relayUrl: 'ws://relay.test'
+    });
+    const onDisconnected = vi.fn();
+    client.on('disconnected', onDisconnected);
+
+    const connecting = client.connect();
+    const socket = latestSocket();
+    socket.readyState = 1;
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'register_ack',
+          clientRole: 'discord',
+          clientId: 'discord-bot',
+          connectionId: 'conn-1'
+        })
+      )
+    );
+    await connecting;
+
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'pong',
+          timestamp: '2026-03-11T00:00:00.000Z'
+        })
+      )
+    );
+    socket.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'permission_response',
+          clientId: 'workspace-1',
+          requestId: 'req-ignored',
+          permissionId: 'perm-ignored',
+          approved: true
+        })
+      )
+    );
+
+    expect(client.isConnected).toBe(true);
+
+    socket.emit('error', new Error('late disconnect'));
+    expect(onDisconnected).toHaveBeenCalled();
+
+    await vi.runOnlyPendingTimersAsync();
+    const reconnectSocket = latestSocket();
+    reconnectSocket.emit('error', new Error('retry failed'));
+    await Promise.resolve();
+
+    expect(sockets.length).toBeGreaterThan(1);
+  });
+
   it('sends prompts, handles stream completions, and permission requests', async () => {
     const client = new RelayDiscordClient({
       clientId: 'discord-bot',

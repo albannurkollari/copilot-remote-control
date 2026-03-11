@@ -392,6 +392,40 @@ describe('extension helpers', () => {
     expect(markdown).toContain('(no response text)');
   });
 
+  it('trims fence length but skips runs shorter than current fence', () => {
+    expect(__testing.fenceFor('``short')).toBe('```');
+  });
+
+  it('renders denied permissions with reason and command but without details', () => {
+    const markdown = __testing.renderTranscriptMarkdown([
+      {
+        clientId: 'workspace-1',
+        finishedAt: 'z',
+        mode: 'ask',
+        permissions: [
+          {
+            action: 'run_terminal_command',
+            approved: false,
+            command: 'rm -rf /tmp',
+            reason: 'Too dangerous',
+            requestedAt: 'a',
+            respondedAt: 'b',
+            title: 'Run command'
+          }
+        ],
+        prompt: 'prompt',
+        requestId: 'req-denied',
+        response: 'resp',
+        startedAt: 'x'
+      }
+    ]);
+
+    expect(markdown).toContain('denied');
+    expect(markdown).toContain('Too dangerous');
+    expect(markdown).toContain('rm -rf /tmp');
+    expect(markdown).not.toContain('Details:');
+  });
+
   it('normalizes thrown values into user-facing errors', () => {
     expect(__testing.toErrorMessage(new Error('boom'))).toBe('boom');
     expect(__testing.toErrorMessage('boom')).toBe('boom');
@@ -663,6 +697,36 @@ describe('activate', () => {
     await getCommand('remoteCopilot.reconnectRelay')();
     expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
       'Relay down'
+    );
+  });
+
+  it('shows a generated message when no secret exists yet', async () => {
+    const context = createContext();
+    await activate(context);
+
+    configurationState.sharedSecret = '';
+
+    await getCommand('remoteCopilot.copySharedSecret')();
+
+    expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('generated')
+    );
+    expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('generated, saved to settings'),
+      'Open Settings'
+    );
+  });
+
+  it('does not open settings when the shared secret dialog is dismissed', async () => {
+    const context = createContext();
+    await activate(context);
+
+    mockVscode.commands.executeCommand.mockClear();
+    await getCommand('remoteCopilot.copySharedSecret')();
+
+    expect(mockVscode.commands.executeCommand).not.toHaveBeenCalledWith(
+      'workbench.action.openSettings',
+      expect.anything()
     );
   });
 
