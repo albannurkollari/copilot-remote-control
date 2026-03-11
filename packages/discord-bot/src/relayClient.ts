@@ -83,10 +83,6 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
       let settled = false;
 
       const fail = (error: Error) => {
-        if (settled) {
-          return;
-        }
-
         settled = true;
         this.#connectPromise = undefined;
         reject(error);
@@ -119,6 +115,15 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
       socket.on('message', (data) => {
         void this.#handleMessage(data.toString(), {
           onRegisterAck: succeed
+        }).catch((error) => {
+          const messageError =
+            error instanceof Error ? error : new Error(String(error));
+
+          if (!settled) {
+            fail(messageError);
+          }
+
+          socket.close();
         });
       });
 
@@ -258,29 +263,32 @@ export class RelayDiscordClient extends EventEmitter<RelayClientEvents> {
       return;
     }
 
-    if ('requestId' in message) {
-      const pending = this.#pendingRequests.get(message.requestId);
-      if (!pending) {
-        return;
-      }
-
-      if (message.type === 'copilot_stream') {
-        await pending.onStream?.(message);
-        if (message.done) {
-          this.#pendingRequests.delete(message.requestId);
-          if (message.error) {
-            pending.reject(new Error(message.error));
-          } else {
-            pending.resolve();
-          }
-        }
-        return;
-      }
-
-      if (message.type === 'permission_request') {
-        await pending.onPermissionRequest?.(message);
-      }
+    if (
+      message.type !== 'copilot_stream' &&
+      message.type !== 'permission_request'
+    ) {
+      return;
     }
+
+    const pending = this.#pendingRequests.get(message.requestId);
+    if (!pending) {
+      return;
+    }
+
+    if (message.type === 'copilot_stream') {
+      await pending.onStream?.(message);
+      if (message.done) {
+        this.#pendingRequests.delete(message.requestId);
+        if (message.error) {
+          pending.reject(new Error(message.error));
+        } else {
+          pending.resolve();
+        }
+      }
+      return;
+    }
+
+    await pending.onPermissionRequest?.(message);
   }
 
   #handleDisconnect() {

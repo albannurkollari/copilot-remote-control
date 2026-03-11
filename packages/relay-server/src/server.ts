@@ -372,22 +372,7 @@ export class RelayServer {
       return;
     }
 
-    const vscodeClient = this.#clients.vscode.get(request.targetClientId);
-    if (!vscodeClient) {
-      this.#sendStatus(
-        client.socket,
-        'error',
-        'target_not_connected',
-        `No VS Code client is connected for ${request.targetClientId}.`,
-        {
-          requestId: message.requestId,
-          clientId: request.targetClientId,
-          targetClientRole: 'vscode'
-        }
-      );
-      this.#requests.delete(message.requestId);
-      return;
-    }
+    const vscodeClient = this.#clients.vscode.get(request.targetClientId)!;
 
     if (request.cancelRequested) {
       this.#sendStatus(
@@ -523,22 +508,7 @@ export class RelayServer {
       return;
     }
 
-    const vscodeClient = this.#clients.vscode.get(request.targetClientId);
-    if (!vscodeClient) {
-      this.#sendStatus(
-        client.socket,
-        'error',
-        'target_not_connected',
-        `No VS Code client is connected for ${request.targetClientId}.`,
-        {
-          requestId: message.requestId,
-          clientId: request.targetClientId,
-          targetClientRole: 'vscode'
-        }
-      );
-      this.#requests.delete(message.requestId);
-      return;
-    }
+    const vscodeClient = this.#clients.vscode.get(request.targetClientId)!;
 
     this.#send(vscodeClient.socket, message);
   }

@@ -625,14 +625,11 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
         continue;
       }
 
-      const activePending = takePendingApproval(pendingApprovals, permissionId);
-      if (!activePending) {
-        continue;
-      }
+      takePendingApproval(pendingApprovals, permissionId);
 
-      activePending.resolve({ approved: false, reason });
-      void activePending.message.edit({
-        content: `${formatPermissionRequest(activePending.request)}\n\nDecision: Cancelled`,
+      pending.resolve({ approved: false, reason });
+      void pending.message.edit({
+        content: `${formatPermissionRequest(pending.request)}\n\nDecision: Cancelled`,
         components: []
       });
     }
@@ -669,14 +666,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
           const activePrompt = takePendingPrompt(
             pendingPrompts,
             promptAction.requestId
-          );
-          if (!activePrompt) {
-            await sendEphemeralResponse(
-              interaction,
-              'This Copilot request is no longer active.'
-            );
-            return;
-          }
+          )!;
 
           await interaction.deferUpdate();
           await activePrompt.cancel();
@@ -708,14 +698,7 @@ export const createDiscordBot = (config: DiscordBotConfig) => {
         const activePending = takePendingApproval(
           pendingApprovals,
           parsed.permissionId
-        );
-        if (!activePending) {
-          await sendEphemeralResponse(
-            interaction,
-            'This permission request is no longer active.'
-          );
-          return;
-        }
+        )!;
 
         const approved =
           parsed.action === 'approve' || parsed.action === 'approve_ttl';

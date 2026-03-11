@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
 import pc from 'picocolors';
 
 import {
-  type EnvMode,
   type EnvValues,
   applyEnvValuesToProcess,
   buildRelayUrl,
@@ -16,12 +13,12 @@ import {
   formatVsCodeSettings,
   hasMissingRequiredEnvValues,
   isMeaningfulValue,
-  loadRemoteCopilotEnv,
   mergeRemoteCopilotEnvValues,
   normalizeRelayPath,
-  writeRemoteCopilotEnvFile
-} from '../../../scripts/env.ts';
-import { runRemoteControlStack } from './runtime.ts';
+  readEnvValues,
+  resolveConfigPath,
+  writeConfigValues
+} from '../../shared/src/env.ts';
 
 type PromptField = {
   defaultValue?: (values: EnvValues) => string;
@@ -40,8 +37,6 @@ interface EnsureEnvResult {
   values: EnvValues;
 }
 
-const CURRENT_DIR = fileURLToPath(new URL('.', import.meta.url));
-const REPO_ROOT = path.resolve(CURRENT_DIR, '../../..');
 const ANSI_YELLOW = '\x1b[33m';
 const ANSI_RESET = '\x1b[39m';
 
@@ -93,10 +88,6 @@ const PROMPT_FIELDS: PromptField[] = [
 ];
 
 const program = new Command();
-
-const resolveEnvPath = (mode: EnvMode) => {
-  return path.resolve(REPO_ROOT, `.env.${mode}`);
-};
 
 const promptForValue = async (
   rl: ReturnType<typeof createInterface>,
@@ -185,46 +176,48 @@ const promptForEnvValues = async (
       }
     }
 
-    return mergeRemoteCopilotEnvValues(
-      nextValues.APP_ENV as EnvMode,
-      nextValues
-    );
+    const mode = nextValues.APP_ENV === 'prod' ? 'prod' : 'dev';
+    return mergeRemoteCopilotEnvValues(mode, nextValues);
   } finally {
     rl.close();
   }
 };
 
-const ensureEnvFile = async (
-  mode: EnvMode,
+const ensureConfig = async (
   options: EnsureEnvOptions = {}
 ): Promise<EnsureEnvResult> => {
-  const envPath = resolveEnvPath(mode);
-  const { values: mergedValues } = await loadRemoteCopilotEnv(mode, REPO_ROOT);
-  const hasMissingRequiredValues = hasMissingRequiredEnvValues(mergedValues);
+  const configPath = resolveConfigPath();
+  const rawValues = await readEnvValues(configPath);
+  const mode = rawValues.APP_ENV === 'prod' ? 'prod' : 'dev';
+  const mergedValues = mergeRemoteCopilotEnvValues(mode, rawValues);
 
   const shouldPrompt =
-    options.force || !(await fileExists(envPath)) || hasMissingRequiredValues;
+    options.force ||
+    !(await fileExists(configPath)) ||
+    hasMissingRequiredEnvValues(mergedValues);
+
   const finalValues = shouldPrompt
     ? await promptForEnvValues(mergedValues, options)
     : mergedValues;
 
-  return writeRemoteCopilotEnvFile(mode, finalValues, REPO_ROOT);
+  await writeConfigValues(finalValues, configPath);
+
+  return { envPath: configPath, values: finalValues };
 };
 
 const printNextSteps = (result: EnsureEnvResult) => {
-  process.stdout.write(
-    `${pc.green('Saved')} ${pc.cyan(path.relative(REPO_ROOT, result.envPath) || result.envPath)}\n`
-  );
+  process.stdout.write(`${pc.green('Saved')} ${pc.cyan(result.envPath)}\n`);
   process.stdout.write(
     `${pc.yellow('Tip:')} Generate or copy the shared secret from the VS Code extension first, then paste it into ${pc.cyan('copilot-rc init')}.\n`
   );
   process.stdout.write(`${pc.bold(formatVsCodeSettings(result.values))}\n`);
 };
 
-const startRemoteControl = async (mode: EnvMode) => {
-  const result = await ensureEnvFile(mode);
+const startRemoteControl = async () => {
+  const result = await ensureConfig();
   applyEnvValuesToProcess(result.values);
 
+  const { runRemoteControlStack } = await import('./runtime.ts');
   await runRemoteControlStack({
     onRelayReady: async (address: string) => {
       process.stdout.write(
@@ -256,17 +249,11 @@ program
 program
   .command('init')
   .description(
-    'Create or update the local env file used by the relay server and Discord bot.'
-  )
-  .option(
-    '-e, --env <mode>',
-    'Environment file to configure (dev or prod).',
-    'dev'
+    'Create or update the config used by the relay server and Discord bot.'
   )
   .option('-f, --force', 'Prompt again for existing values.')
-  .action(async (options: { env: string; force?: boolean }) => {
-    const mode = options.env === 'prod' ? 'prod' : 'dev';
-    const result = await ensureEnvFile(mode, { force: options.force });
+  .action(async (options: { force?: boolean }) => {
+    const result = await ensureConfig({ force: options.force });
     printNextSteps(result);
   });
 
@@ -275,10 +262,8 @@ program
   .description(
     'Start the relay server first and then the Discord bot in one command.'
   )
-  .option('-e, --env <mode>', 'Environment file to use (dev or prod).', 'dev')
-  .action(async (options: { env: string }) => {
-    const mode = options.env === 'prod' ? 'prod' : 'dev';
-    await startRemoteControl(mode);
+  .action(async () => {
+    await startRemoteControl();
   });
 
 const main = async () => {

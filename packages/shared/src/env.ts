@@ -1,23 +1,15 @@
-#!/usr/bin/env node
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseEnv } from 'node:util';
-import pc from 'picocolors';
-
-import { CommandBuilder, ProcessState } from './commands.ts';
 
 const READ_OPTIONS = { encoding: 'utf8' } as const;
-const CURRENT_DIR = fileURLToPath(new URL('.', import.meta.url));
-export const REPO_ROOT = path.resolve(CURRENT_DIR, '..');
-const EXAMPLE_ENV_PATH = path.resolve(REPO_ROOT, 'examples/.env.example');
-const oxfmt = new CommandBuilder({ main: 'oxfmt', sub: [] });
+const PLACEHOLDER_PREFIXES = ['replace-with-', '{{'];
 
 export type EnvMode = 'dev' | 'prod';
 export type EnvValues = Record<string, string>;
-type PlaceholderMap = Record<string, string>;
+export type PlaceholderMap = Record<string, string>;
 
-const PLACEHOLDER_PREFIXES = ['replace-with-', '{{'];
 export const REMOTE_COPILOT_REQUIRED_KEYS = [
   'DISCORD_APPLICATION_ID',
   'DISCORD_GUILD_ID',
@@ -61,44 +53,6 @@ export const ENV_PRESETS: Record<EnvMode, EnvValues> = {
     VSCODE_REMOTE_COPILOT_SHARED_SECRET: ''
   }
 };
-
-const REMOTE_COPILOT_ENV_TEMPLATE = [
-  '# =============================================================================',
-  '# Remote Copilot environment',
-  '# =============================================================================',
-  'APP_ENV={{APP_ENV}}',
-  '',
-  '# =============================================================================',
-  '# Relay server',
-  '# =============================================================================',
-  'RELAY_HOST={{RELAY_HOST}}',
-  'RELAY_PORT={{RELAY_PORT}}',
-  'RELAY_PATH={{RELAY_PATH}}',
-  'RELAY_URL={{RELAY_URL}}',
-  'RELAY_LOG={{RELAY_LOG}}',
-  'REMOTE_COPILOT_SHARED_SECRET={{REMOTE_COPILOT_SHARED_SECRET}}',
-  '',
-  '# =============================================================================',
-  '# Discord bot',
-  '# =============================================================================',
-  'DISCORD_TOKEN={{DISCORD_TOKEN}}',
-  'DISCORD_APPLICATION_ID={{DISCORD_APPLICATION_ID}}',
-  'DISCORD_GUILD_ID={{DISCORD_GUILD_ID}}',
-  'DISCORD_STREAM_UPDATE_MS={{DISCORD_STREAM_UPDATE_MS}}',
-  'REMOTE_COPILOT_CLIENT_ID={{REMOTE_COPILOT_CLIENT_ID}}',
-  '',
-  '# =============================================================================',
-  '# VS Code extension reference values',
-  '# =============================================================================',
-  '# Copy these values into VS Code settings.json:',
-  '#   "remoteCopilot.clientId": "{{VSCODE_REMOTE_COPILOT_CLIENT_ID}}"',
-  '#   "remoteCopilot.relayUrl": "{{VSCODE_REMOTE_COPILOT_RELAY_URL}}"',
-  '#   "remoteCopilot.sharedSecret": "{{VSCODE_REMOTE_COPILOT_SHARED_SECRET}}"',
-  'VSCODE_REMOTE_COPILOT_CLIENT_ID={{VSCODE_REMOTE_COPILOT_CLIENT_ID}}',
-  'VSCODE_REMOTE_COPILOT_RELAY_URL={{VSCODE_REMOTE_COPILOT_RELAY_URL}}',
-  'VSCODE_REMOTE_COPILOT_SHARED_SECRET={{VSCODE_REMOTE_COPILOT_SHARED_SECRET}}',
-  ''
-].join('\n');
 
 export const resolveEnvPath = (mode: EnvMode, rootDir = process.cwd()) => {
   return path.resolve(rootDir, `.env.${mode}`);
@@ -161,7 +115,7 @@ export const mergeRemoteCopilotEnvValues = (
   };
 
   merged.APP_ENV = mode;
-  merged.RELAY_PATH = normalizeRelayPath(merged.RELAY_PATH || '/');
+  merged.RELAY_PATH = normalizeRelayPath(merged.RELAY_PATH);
   merged.RELAY_LOG = merged.RELAY_LOG || 'standard';
   merged.DISCORD_STREAM_UPDATE_MS = merged.DISCORD_STREAM_UPDATE_MS || '1200';
   merged.REMOTE_COPILOT_CLIENT_ID =
@@ -206,11 +160,12 @@ export const loadRemoteCopilotEnv = async (
 export const writeRemoteCopilotEnvFile = async (
   mode: EnvMode,
   values: Partial<EnvValues>,
+  template: string,
   rootDir = process.cwd()
 ) => {
   const envPath = resolveEnvPath(mode, rootDir);
   const finalValues = mergeRemoteCopilotEnvValues(mode, values);
-  const content = renderEnvFile(REMOTE_COPILOT_ENV_TEMPLATE, finalValues);
+  const content = renderEnvFile(template.trimEnd(), finalValues);
 
   await writeFile(envPath, content, READ_OPTIONS);
 
@@ -241,6 +196,28 @@ export const formatVsCodeSettings = (values: EnvValues) => {
   ].join('\n');
 };
 
+export const resolveConfigPath = () => {
+  const configBase =
+    process.env.APPDATA ??
+    process.env.XDG_CONFIG_HOME ??
+    path.join(os.homedir(), '.config');
+
+  return path.join(configBase, 'copilot-rc', 'config');
+};
+
+export const writeConfigValues = async (
+  values: EnvValues,
+  configPath: string
+) => {
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const content =
+    Object.entries(values)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n') + '\n';
+
+  await writeFile(configPath, content, READ_OPTIONS);
+};
+
 export const fileExists = async (targetPath: string) => {
   try {
     await access(targetPath);
@@ -249,52 +226,3 @@ export const fileExists = async (targetPath: string) => {
     return false;
   }
 };
-
-const writeEnvFile = async (mode: EnvMode, template: string) => {
-  const targetPath = resolveEnvPath(mode);
-  const content = renderEnvFile(template.trimEnd(), ENV_PRESETS[mode]);
-
-  await writeFile(targetPath, content, READ_OPTIONS);
-  console.log(`📝 Generated ${pc.cyan(path.basename(targetPath))}`);
-};
-
-const generateEnvFiles = async (modes: EnvMode[]) => {
-  const template = await readFile(EXAMPLE_ENV_PATH, READ_OPTIONS);
-
-  for (const mode of modes) {
-    await writeEnvFile(mode, template);
-  }
-};
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const result = (() => {
-    const state = new ProcessState('--all', '--dev', '--prod');
-    const modes: EnvMode[] = [];
-
-    if (state.flags.all || (!state.flags.dev && !state.flags.prod)) {
-      modes.push('dev', 'prod');
-    } else {
-      if (state.flags.dev) {
-        modes.push('dev');
-      }
-
-      if (state.flags.prod) {
-        modes.push('prod');
-      }
-    }
-
-    return generateEnvFiles(modes);
-  })();
-
-  result
-    .then(() => {
-      oxfmt.run(['README.md', 'package.json', 'scripts/*.ts'], {
-        debugCommand: false,
-        log: false
-      });
-    })
-    .catch((error) => {
-      console.error(pc.redBright(String(error)));
-      process.exit(1);
-    });
-}

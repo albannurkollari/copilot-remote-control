@@ -64,6 +64,43 @@ describe('RelayServer', () => {
     });
   });
 
+  it('uses default relay options when env vars are absent', () => {
+    delete process.env.RELAY_HOST;
+    delete process.env.RELAY_PATH;
+    delete process.env.RELAY_PORT;
+    delete process.env.RELAY_LOG;
+    delete process.env.REMOTE_COPILOT_SHARED_SECRET;
+
+    expect(loadRelayServerOptions()).toEqual({
+      host: '127.0.0.1',
+      path: '/',
+      port: 8787,
+      sharedSecret: undefined,
+      verbose: false
+    });
+  });
+
+  it('parses a valid RELAY_PORT and uses RELAY_LOG verbose without --verbose flag', () => {
+    process.env.RELAY_PORT = '9876';
+    process.env.RELAY_LOG = 'verbose';
+
+    const options = loadRelayServerOptions();
+    expect(options.port).toBe(9876);
+    expect(options.verbose).toBe(true);
+  });
+
+  it('treats a whitespace-only sharedSecret as absent', () => {
+    const server = new RelayServer({ port: 8814, sharedSecret: '   ' });
+    servers.push(server);
+
+    expect(server.sharedSecret).toBeUndefined();
+  });
+
+  it('uses default port when none is provided', () => {
+    const server = new RelayServer({});
+    expect(server.address).toContain(':8787');
+  });
+
   it('starts a relay server with helper defaults', async () => {
     const server = await startRelayServer({ port: 8803 });
     servers.push(server);
@@ -974,6 +1011,67 @@ describe('RelayServer', () => {
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining('Error: Boom')
       );
+
+      discord.close();
+      vscode.close();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('uses Replies as fallback when verbose stream finishes with no accumulated text', async () => {
+    const server = new RelayServer({ port: 8815, verbose: true });
+    servers.push(server);
+    await server.start();
+
+    const logSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    try {
+      const discord = await createSocket(server.address);
+      const vscode = await createSocket(server.address);
+
+      discord.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'discord',
+          clientId: 'bot-1'
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('register_ack');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'register',
+          clientRole: 'vscode',
+          clientId: 'workspace-1'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('register_ack');
+
+      const requestId = createRequestId();
+      discord.send(
+        JSON.stringify({
+          type: 'copilot_prompt',
+          clientId: 'workspace-1',
+          requestId,
+          mode: 'ask',
+          prompt: 'Q'
+        })
+      );
+      expect((await nextMessage(vscode)).type).toBe('copilot_prompt');
+
+      vscode.send(
+        JSON.stringify({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId,
+          done: true
+        })
+      );
+      expect((await nextMessage(discord)).type).toBe('copilot_stream');
+      await Promise.resolve();
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Replies'));
 
       discord.close();
       vscode.close();

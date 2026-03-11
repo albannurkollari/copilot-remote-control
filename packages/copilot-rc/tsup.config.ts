@@ -8,7 +8,9 @@ export default defineConfig({
   entry: ['src/index.ts'],
   external: ['discord.js', 'ws'],
   format: ['esm'],
-  noExternal: ['@remote-copilot/shared'],
+  onSuccess: 'node scripts/copyEnvTemplate.ts',
+  platform: 'node',
   sourcemap: !isCI,
+  splitting: true,
   target: 'node24'
 });

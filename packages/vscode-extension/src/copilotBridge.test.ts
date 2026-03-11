@@ -1419,4 +1419,170 @@ describe('copilot bridge tool execution helpers', () => {
 
     expect(bridge.getSharedConversationSize()).toBe(0);
   });
+
+  it('logs unknown when model has no id', async () => {
+    const model = {
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const outputChannel = { appendLine: vi.fn() };
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      outputChannel as never
+    );
+
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-id',
+        mode: 'ask',
+        prompt: 'Hello',
+        userDisplayName: 'alice'
+      },
+      { onText: vi.fn(), requestPermission: vi.fn() }
+    );
+
+    expect(outputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('unknown')
+    );
+  });
+
+  it('uses a default denial message when no reason is provided', async () => {
+    const toolCall = new mockVscode.LanguageModelToolCallPart(
+      'call-1',
+      'run_terminal_command',
+      { command: 'pnpm test' }
+    );
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([toolCall]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    await expect(
+      bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId: 'req-1',
+          mode: 'agent',
+          prompt: 'Run tests',
+          userDisplayName: 'alice'
+        },
+        {
+          onText: vi.fn(),
+          requestPermission: vi.fn().mockResolvedValue({ approved: false })
+        }
+      )
+    ).rejects.toThrow('Permission denied for run_terminal_command.');
+  });
+
+  it('treats a non-string command input as absent in the permission plan', async () => {
+    const toolCall = new mockVscode.LanguageModelToolCallPart(
+      'call-no-cmd',
+      'run_terminal_command',
+      { command: 42 }
+    );
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([toolCall]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    let capturedRequest: unknown;
+    await expect(
+      bridge.runPrompt(
+        {
+          type: 'copilot_prompt',
+          clientId: 'default',
+          requestId: 'req-1',
+          mode: 'agent',
+          prompt: 'Run',
+          userDisplayName: 'alice'
+        },
+        {
+          onText: vi.fn(),
+          requestPermission: vi.fn().mockImplementation((req) => {
+            capturedRequest = req;
+            return Promise.resolve({ approved: false, reason: 'no' });
+          })
+        }
+      )
+    ).rejects.toThrow('no');
+
+    expect(capturedRequest).toMatchObject({ command: undefined });
+  });
+
+  it('silently skips unknown stream part types', async () => {
+    const unknownPart = { kind: 'unknown', value: 'data' };
+    const model = {
+      id: 'copilot-auto',
+      sendRequest: vi.fn().mockResolvedValue({
+        stream: toAsyncIterable([unknownPart]),
+        text: toAsyncIterable([])
+      })
+    };
+
+    mockVscode.selectChatModels.mockResolvedValue([model]);
+
+    const bridge = new CopilotBridge(
+      {
+        languageModelAccessInformation: {
+          canSendRequest: () => true
+        }
+      } as never,
+      { appendLine: vi.fn() } as never
+    );
+
+    const onText = vi.fn();
+    await bridge.runPrompt(
+      {
+        type: 'copilot_prompt',
+        clientId: 'default',
+        requestId: 'req-unknown',
+        mode: 'ask',
+        prompt: 'Test',
+        userDisplayName: 'alice'
+      },
+      { onText, requestPermission: vi.fn() }
+    );
+
+    expect(onText).not.toHaveBeenCalled();
+  });
 });

@@ -257,6 +257,20 @@ const createButtonInteraction = (customId: string, userId = 'user-1') => {
   } as any;
 };
 
+const createBotConfig = (overrides: Record<string, unknown> = {}) => {
+  return {
+    applicationId: 'app-1',
+    clientId: 'discord-bot',
+    guildId: 'guild-1',
+    relayUrl: 'ws://relay.test',
+    sharedSecret: 'secret',
+    targetClientId: 'workspace-1',
+    token: 'token',
+    updateIntervalMs: 1,
+    ...overrides
+  };
+};
+
 describe('discord bot runtime flows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -298,9 +312,95 @@ describe('discord bot runtime flows', () => {
     await bot.start();
     expect(clientInstances[0].login).toHaveBeenCalledWith('token');
 
+    clientInstances[0].user = undefined;
     await clientInstances[0].emitAsync('ready');
     expect(relayInstances[0].connect).toHaveBeenCalled();
     expect(restCalls).toHaveLength(1);
+  });
+
+  it('handles default ttl approvals, approve-once decisions, and denials', async () => {
+    createDiscordBot(createBotConfig());
+    const relay = relayInstances[0];
+    let permissionCount = 0;
+
+    relay.sendPrompt.mockImplementation(async (message: any, handlers: any) => {
+      permissionCount += 1;
+      await handlers.onPermissionRequest({
+        type: 'permission_request',
+        action: 'edit_file',
+        clientId: 'workspace-1',
+        permissionId: `perm-${permissionCount}`,
+        requestId: message.requestId,
+        title: 'Edit file'
+      });
+    });
+
+    const ttlInteraction = createChatInteraction();
+    void clientInstances[0].emitAsync('interactionCreate', ttlInteraction);
+    await vi.waitFor(() => {
+      expect(ttlInteraction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    const ttlButton = createButtonInteraction(
+      'remoteCopilot:permission:approve_ttl:perm-1'
+    );
+    await clientInstances[0].emitAsync('interactionCreate', ttlButton);
+    expect(relay.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-1' }),
+      true,
+      'Approved from Discord for 30m.'
+    );
+
+    const approveOnceInteraction = createChatInteraction();
+    approveOnceInteraction.user.id = 'user-2';
+    approveOnceInteraction.user.username = 'bob';
+    void clientInstances[0].emitAsync(
+      'interactionCreate',
+      approveOnceInteraction
+    );
+    await vi.waitFor(() => {
+      expect(approveOnceInteraction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    const approveOnceButton = createButtonInteraction(
+      'remoteCopilot:permission:approve:perm-2',
+      'user-2'
+    );
+    await clientInstances[0].emitAsync('interactionCreate', approveOnceButton);
+    expect(relay.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-2' }),
+      true,
+      'Approved from Discord.'
+    );
+    expect(approveOnceButton.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Decision: Approved from Discord.')
+      })
+    );
+
+    const denyInteraction = createChatInteraction();
+    denyInteraction.user.id = 'user-3';
+    denyInteraction.user.username = 'cara';
+    void clientInstances[0].emitAsync('interactionCreate', denyInteraction);
+    await vi.waitFor(() => {
+      expect(denyInteraction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    const denyButton = createButtonInteraction(
+      'remoteCopilot:permission:deny:perm-3',
+      'user-3'
+    );
+    await clientInstances[0].emitAsync('interactionCreate', denyButton);
+    expect(relay.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-3' }),
+      false,
+      'Denied from Discord.'
+    );
+    expect(denyButton.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Decision: Denied')
+      })
+    );
   });
 
   it('cancels a pending prompt from the original requester', async () => {
@@ -398,6 +498,61 @@ describe('discord bot runtime flows', () => {
     });
     expect(secondInteraction.followUp).not.toHaveBeenCalled();
     void bot;
+  });
+
+  it('expires cached approvals and prompts again after the ttl has elapsed', async () => {
+    vi.useFakeTimers();
+
+    try {
+      createDiscordBot(createBotConfig({ approvalTtlMs: 10 }));
+      const relay = relayInstances[0];
+      relay.sendPrompt.mockImplementation(
+        async (_message: any, handlers: any) => {
+          await handlers.onPermissionRequest({
+            type: 'permission_request',
+            action: 'edit_file',
+            clientId: 'workspace-1',
+            permissionId: 'perm-expiring',
+            requestId: 'req-expiring',
+            title: 'Edit file'
+          });
+        }
+      );
+
+      const firstInteraction = createChatInteraction();
+      void clientInstances[0].emitAsync('interactionCreate', firstInteraction);
+      await vi.waitFor(() => {
+        expect(firstInteraction.followUp).toHaveBeenCalledTimes(1);
+      });
+
+      await clientInstances[0].emitAsync(
+        'interactionCreate',
+        createButtonInteraction(
+          'remoteCopilot:permission:approve_ttl:perm-expiring'
+        )
+      );
+      await vi.waitFor(() => {
+        expect(relay.respondToPermissionRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ permissionId: 'perm-expiring' }),
+          true,
+          'Approved from Discord for 1s.'
+        );
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      const secondInteraction = createChatInteraction();
+      await clientInstances[0].emitAsync(
+        'interactionCreate',
+        secondInteraction
+      );
+
+      await vi.waitFor(() => {
+        expect(secondInteraction.followUp).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('times out unanswered permission requests', async () => {
@@ -608,6 +763,22 @@ describe('discord bot runtime flows', () => {
     });
   });
 
+  it('stringifies non-Error interaction failures before replying', async () => {
+    createDiscordBot(createBotConfig());
+
+    const interaction = createChatInteraction();
+    interaction.deferReply.mockRejectedValueOnce('Prompt failed');
+    interaction.reply.mockResolvedValueOnce(undefined);
+
+    await clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.reply).toHaveBeenCalledWith({
+        content: 'Error: Prompt failed',
+        flags: 64
+      });
+    });
+  });
+
   it('swallows expired Discord interactions before a reply is sent', async () => {
     createDiscordBot({
       applicationId: 'app-1',
@@ -724,6 +895,103 @@ describe('discord bot runtime flows', () => {
         flags: 64
       })
     );
+  });
+
+  it('cancels pending approval prompts and reports stale relay cancellations back through the buffered reply', async () => {
+    createDiscordBot(createBotConfig());
+    const relay = relayInstances[0];
+    const approvalMessage = { edit: vi.fn().mockResolvedValue(undefined) };
+    const unrelatedApprovalMessage = {
+      edit: vi.fn().mockResolvedValue(undefined)
+    };
+    const stalledPrompt = new Promise<void>(() => undefined);
+    const permissionFlows: Promise<void>[] = [];
+
+    relay.sendPrompt.mockImplementation(async (message: any, handlers: any) => {
+      const nextPermissionId = `perm-${permissionFlows.length + 1}`;
+      const permissionFlow = handlers.onPermissionRequest({
+        type: 'permission_request',
+        action: 'edit_file',
+        clientId: 'workspace-1',
+        permissionId: nextPermissionId,
+        requestId: message.requestId,
+        title: 'Edit file'
+      });
+      permissionFlows.push(permissionFlow);
+
+      await permissionFlow;
+
+      return stalledPrompt;
+    });
+    relay.cancelPrompt.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    const interaction = createChatInteraction();
+    interaction.followUp.mockResolvedValue(approvalMessage);
+
+    void clientInstances[0].emitAsync('interactionCreate', interaction);
+    await vi.waitFor(() => {
+      expect(interaction.followUp).toHaveBeenCalledTimes(1);
+    });
+    const firstPromptRequestId = relay.sendPrompt.mock.calls[0][0].requestId;
+
+    const unrelatedInteraction = createChatInteraction();
+    unrelatedInteraction.followUp.mockResolvedValue(unrelatedApprovalMessage);
+
+    void clientInstances[0].emitAsync(
+      'interactionCreate',
+      unrelatedInteraction
+    );
+    await vi.waitFor(() => {
+      expect(unrelatedInteraction.followUp).toHaveBeenCalledTimes(1);
+    });
+
+    await clientInstances[0].emitAsync(
+      'interactionCreate',
+      createButtonInteraction(
+        `remoteCopilot:prompt:cancel:${firstPromptRequestId}`
+      )
+    );
+
+    await permissionFlows[0];
+
+    expect(relay.respondToPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionId: 'perm-1' }),
+      false,
+      __testing.DISCORD_CANCEL_REASON
+    );
+    expect(approvalMessage.edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Decision: Cancelled'),
+        components: []
+      })
+    );
+    expect(unrelatedApprovalMessage.edit).not.toHaveBeenCalled();
+
+    const staleInteraction = createChatInteraction();
+    staleInteraction.followUp.mockResolvedValue({
+      edit: vi.fn().mockResolvedValue(undefined)
+    });
+
+    void clientInstances[0].emitAsync('interactionCreate', staleInteraction);
+    await vi.waitFor(() => {
+      expect(relay.sendPrompt).toHaveBeenCalledTimes(2);
+    });
+    const secondPromptRequestId = relay.sendPrompt.mock.calls[1][0].requestId;
+
+    const staleCancelButton = createButtonInteraction(
+      `remoteCopilot:prompt:cancel:${secondPromptRequestId}`
+    );
+    await clientInstances[0].emitAsync('interactionCreate', staleCancelButton);
+
+    await vi.waitFor(() => {
+      expect(staleCancelButton.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining(
+            'Error: This request is no longer active.'
+          )
+        })
+      );
+    });
   });
 
   it('swallows follow-up failures while reporting button interaction errors', async () => {

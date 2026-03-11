@@ -386,6 +386,13 @@ describe('handleCopilotInteraction', () => {
           delta: 'Hello',
           done: false
         });
+        await handlers.onStream?.({
+          type: 'copilot_stream',
+          clientId: 'workspace-1',
+          requestId: 'req-1',
+          delta: ' again',
+          done: false
+        });
       })
     } as any;
     const registerPendingPrompt = vi.fn();
@@ -445,6 +452,49 @@ describe('handleCopilotInteraction', () => {
         sendPrompt: vi.fn().mockRejectedValue(new Error('boom'))
       } as any,
       { targetClientId: 'workspace-1', updateIntervalMs: 1 },
+      vi.fn(),
+      {
+        cancelPendingApprovals: vi.fn(),
+        registerPendingPrompt: vi.fn(),
+        unregisterPendingPrompt: vi.fn()
+      }
+    );
+
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('Error: boom')
+      })
+    );
+  });
+
+  it('falls back to the default update interval and stringifies non-Error failures', async () => {
+    const interaction = {
+      channel: { isThread: () => false },
+      channelId: 'channel-1',
+      deferred: false,
+      editReply: vi.fn().mockResolvedValue(undefined),
+      followUp: vi.fn().mockResolvedValue(undefined),
+      id: 'message-1',
+      options: {
+        getString: vi.fn((name: string) => {
+          return name === 'mode' ? 'ask' : 'Explain this';
+        })
+      },
+      replied: false,
+      user: {
+        globalName: 'Alice',
+        id: 'user-1',
+        username: 'alice'
+      },
+      deferReply: vi.fn().mockResolvedValue(undefined)
+    } as any;
+
+    await handleCopilotInteraction(
+      interaction,
+      {
+        sendPrompt: vi.fn().mockRejectedValue('boom')
+      } as any,
+      { targetClientId: 'workspace-1' },
       vi.fn(),
       {
         cancelPendingApprovals: vi.fn(),
